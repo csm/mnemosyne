@@ -1,0 +1,36 @@
+[workspace]
+members = [
+    "code_storage",
+    "code_search",
+    "execution_engine",
+    "core_functions",
+    "code_editor",
+    "inference_engine",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = []
+license = "MIT"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Error handling
+thiserror = "2"
+anyhow = "1"
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Internal crates
+code_storage = { path = "code_storage" }
+code_search = { path = "code_search" }
+execution_engine = { path = "execution_engine" }
+core_functions = { path = "core_functions" }
+code_editor = { path = "code_editor" }
+inference_engine = { path = "inference_engine" }

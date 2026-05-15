@@ -1,0 +1,19 @@
+[package]
+name = "execution_engine"
+description = "Clojure execution engine — interprets Clojure forms via the clojure-rs runtime"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+
+# clojure-rs is the closest published Rust Clojure interpreter;
+# evaluate maturity and swap for a vendored runtime if needed.
+# clojure-rs = "0.1"   # TODO: pin once a stable release is available
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }

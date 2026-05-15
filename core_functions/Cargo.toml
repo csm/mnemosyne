@@ -1,0 +1,12 @@
+[package]
+name = "core_functions"
+description = "Standard library of Clojure functions and reusable template forms for mnemosyne"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+execution_engine.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true

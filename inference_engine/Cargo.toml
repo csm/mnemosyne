@@ -1,0 +1,23 @@
+[package]
+name = "inference_engine"
+description = "Inference engine — wires a pluggable LLM backend with execution, storage, search, and editing"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+code_storage.workspace = true
+code_search.workspace = true
+execution_engine.workspace = true
+core_functions.workspace = true
+code_editor.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+async-trait = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }
+mockall = "0.13"

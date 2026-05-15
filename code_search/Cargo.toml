@@ -1,0 +1,18 @@
+[package]
+name = "code_search"
+description = "Functionality-oriented code search — indexes repositories and answers 'find me a function that does X'"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+code_storage.workspace = true
+tantivy = "0.22"
+tree-sitter = "0.25"
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
