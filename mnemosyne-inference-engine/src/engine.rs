@@ -3,8 +3,8 @@ use crate::{
     tool::{ToolCall, ToolResult},
     Result,
 };
-use code_search::{CodeIndex, SearchQuery};
-use execution_engine::ClojureRuntime;
+use mnemosyne_code_search::{CodeIndex, SearchQuery};
+use mnemosyne_execution_engine::ClojureRuntime;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 

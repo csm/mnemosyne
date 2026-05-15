@@ -1,15 +1,15 @@
 [package]
-name = "inference_engine"
+name = "mnemosyne-inference-engine"
 description = "Inference engine — wires a pluggable LLM backend with execution, storage, search, and editing"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-code_storage.workspace = true
-code_search.workspace = true
-execution_engine.workspace = true
-core_functions.workspace = true
-code_editor.workspace = true
+mnemosyne-code-storage.workspace = true
+mnemosyne-code-search.workspace = true
+mnemosyne-execution-engine.workspace = true
+mnemosyne-core-functions.workspace = true
+mnemosyne-code-editor.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true

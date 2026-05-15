@@ -1,16 +1,13 @@
 [package]
-name = "code_editor"
+name = "mnemosyne-code-editor"
 description = "Structural Clojure code editor — parses, traverses, and rewrites Clojure ASTs programmatically"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-execution_engine.workspace = true
+mnemosyne-execution-engine.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
-
-# Tree-sitter for concrete syntax tree parsing.
-# tree-sitter-clojure provides the Clojure grammar.
 tree-sitter = "0.25"

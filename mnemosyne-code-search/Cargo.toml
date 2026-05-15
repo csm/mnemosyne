@@ -1,11 +1,11 @@
 [package]
-name = "code_search"
+name = "mnemosyne-code-search"
 description = "Functionality-oriented code search — indexes repositories and answers 'find me a function that does X'"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-code_storage.workspace = true
+mnemosyne-code-storage.workspace = true
 tantivy = "0.22"
 tree-sitter = "0.25"
 thiserror.workspace = true

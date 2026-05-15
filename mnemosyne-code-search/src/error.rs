@@ -9,7 +9,7 @@ pub enum SearchError {
     #[error("directory error: {0}")]
     Directory(#[from] tantivy::directory::error::OpenDirectoryError),
     #[error("storage error: {0}")]
-    Storage(#[from] code_storage::StorageError),
+    Storage(#[from] mnemosyne_code_storage::StorageError),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 }

@@ -1,11 +1,11 @@
 [workspace]
 members = [
-    "code_storage",
-    "code_search",
-    "execution_engine",
-    "core_functions",
-    "code_editor",
-    "inference_engine",
+    "mnemosyne-code-storage",
+    "mnemosyne-code-search",
+    "mnemosyne-execution-engine",
+    "mnemosyne-core-functions",
+    "mnemosyne-code-editor",
+    "mnemosyne-inference-engine",
 ]
 resolver = "2"
 
@@ -32,9 +32,9 @@ anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Internal crates
-code_storage = { path = "code_storage" }
-code_search = { path = "code_search" }
-execution_engine = { path = "execution_engine" }
-core_functions = { path = "core_functions" }
-code_editor = { path = "code_editor" }
-inference_engine = { path = "inference_engine" }
+mnemosyne-code-storage    = { path = "mnemosyne-code-storage" }
+mnemosyne-code-search     = { path = "mnemosyne-code-search" }
+mnemosyne-execution-engine = { path = "mnemosyne-execution-engine" }
+mnemosyne-core-functions  = { path = "mnemosyne-core-functions" }
+mnemosyne-code-editor     = { path = "mnemosyne-code-editor" }
+mnemosyne-inference-engine = { path = "mnemosyne-inference-engine" }

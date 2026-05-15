@@ -1,5 +1,5 @@
 [package]
-name = "execution_engine"
+name = "mnemosyne-execution-engine"
 description = "Clojure execution engine — interprets Clojure forms via clojurust"
 version.workspace = true
 edition.workspace = true

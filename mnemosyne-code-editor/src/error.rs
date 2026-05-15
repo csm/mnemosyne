@@ -9,5 +9,5 @@ pub enum EditorError {
     #[error("invalid edit: {0}")]
     InvalidEdit(String),
     #[error("execution error: {0}")]
-    Execution(#[from] execution_engine::ExecutionError),
+    Execution(#[from] mnemosyne_execution_engine::ExecutionError),
 }

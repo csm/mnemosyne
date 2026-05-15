@@ -1,5 +1,5 @@
 use crate::{embedded, Result};
-use execution_engine::ClojureRuntime;
+use mnemosyne_execution_engine::ClojureRuntime;
 
 /// Load all embedded core namespaces into `runtime`.
 pub fn load_core(runtime: &mut ClojureRuntime) -> Result<()> {
