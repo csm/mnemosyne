@@ -16,6 +16,10 @@ authors = []
 license = "MIT"
 
 [workspace.dependencies]
+# Clojurust interpreter (git-only, not published to crates.io)
+cljrs-eval   = { git = "https://github.com/csm/clojurust" }
+cljrs-value  = { git = "https://github.com/csm/clojurust" }
+cljrs-reader = { git = "https://github.com/csm/clojurust" }
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 # Serialization

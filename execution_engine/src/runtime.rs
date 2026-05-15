@@ -1,48 +1,71 @@
 use crate::{ClojureValue, ExecutionError, Result};
-use std::collections::HashMap;
+use cljrs_eval::{standard_env, Env, GlobalEnv};
+use cljrs_reader::Parser;
+use std::sync::Arc;
 
-/// Handle to the Clojure interpreter.
+/// Owns a clojurust interpreter session.
 ///
-/// Backed by clojure-rs (or a compatible runtime); this struct owns the
-/// interpreter state and serializes access so callers don't need to.
+/// `globals` holds the shared, immutable namespace table (clojure.core, etc.)
+/// produced once by `standard_env()`. `env` is the mutable per-session frame
+/// stack and current namespace; it borrows `globals` via `Arc`.
 pub struct ClojureRuntime {
-    // Namespace → var → value; placeholder until a real runtime is wired in.
-    namespaces: HashMap<String, HashMap<String, ClojureValue>>,
-    current_ns: String,
+    globals: Arc<GlobalEnv>,
+    env: Env,
 }
 
 impl ClojureRuntime {
-    pub fn new() -> Self {
-        Self {
-            namespaces: HashMap::from([("user".into(), HashMap::new())]),
-            current_ns: "user".into(),
-        }
-    }
-
-    /// Evaluate a Clojure expression string and return the result.
+    /// Boot a new runtime with the full standard library loaded.
     ///
-    /// TODO: delegate to clojure-rs once the crate dependency is pinned.
+    /// This calls `standard_env()` which eagerly compiles clojure.core;
+    /// use `ClojureRuntime::minimal()` if you need a faster cold start.
+    pub fn new() -> Self {
+        let globals = standard_env();
+        let env = Env::new(Arc::clone(&globals), "user");
+        Self { globals, env }
+    }
+
+    /// Boot with only the minimal bootstrap environment (no clojure.test, etc.).
+    pub fn minimal() -> Self {
+        let globals = cljrs_eval::standard_env_minimal();
+        let env = Env::new(Arc::clone(&globals), "user");
+        Self { globals, env }
+    }
+
+    /// Parse and evaluate all forms in `source`, returning the value of the last form.
     pub fn eval(&mut self, source: &str) -> Result<ClojureValue> {
-        tracing::debug!(ns = %self.current_ns, source, "eval");
-        Err(ExecutionError::Eval(
-            "runtime not yet wired to clojure-rs — stub only".into(),
-        ))
+        tracing::debug!(ns = %self.env.current_ns, "eval");
+        let mut parser = Parser::new(source.to_string(), "<repl>".to_string());
+        let forms = parser.parse_all().map_err(|e| ExecutionError::Parse {
+            location: "<repl>".into(),
+            message: format!("{e}"),
+        })?;
+
+        let mut last = ClojureValue::Nil;
+        for form in &forms {
+            let val = self.env.eval(form).map_err(|e| ExecutionError::Eval(format!("{e:?}")))?;
+            last = ClojureValue::from(val);
+        }
+        Ok(last)
     }
 
-    /// Load a full namespace from source text.
+    /// Load a Clojure source string into the current namespace.
     pub fn load_string(&mut self, source: &str) -> Result<()> {
-        self.eval(source)?;
-        Ok(())
+        self.eval(source).map(|_| ())
     }
 
-    /// Switch the current namespace.
+    /// Switch the current namespace (creates it if it doesn't exist).
     pub fn set_namespace(&mut self, ns: &str) {
-        self.current_ns = ns.to_owned();
-        self.namespaces.entry(ns.to_owned()).or_default();
+        self.env.current_ns = Arc::from(ns);
     }
 
     pub fn current_namespace(&self) -> &str {
-        &self.current_ns
+        &self.env.current_ns
+    }
+
+    /// Expose the underlying `GlobalEnv` for registering native Rust functions
+    /// via `cljrs_eval::GlobalEnv::intern`.
+    pub fn globals(&self) -> &Arc<GlobalEnv> {
+        &self.globals
     }
 }
 
