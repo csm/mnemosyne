@@ -1,0 +1,21 @@
+[package]
+name = "mnemosyne-semantic-search"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mnemosyne-code-search  = { path = "../mnemosyne-code-search" }
+mnemosyne-code-storage = { path = "../mnemosyne-code-storage" }
+
+# Embedding (pure-Rust inference, no build-time binary downloads)
+candle-core         = { version = "0.8", default-features = false }
+candle-nn           = { version = "0.8", default-features = false }
+candle-transformers = { version = "0.8", default-features = false }
+hf-hub              = { version = "0.4", features = ["tokio"] }
+tokenizers          = { version = "0.21", default-features = false, features = ["onig"] }
+
+serde      = { workspace = true }
+serde_json = { workspace = true }
+thiserror  = { workspace = true }
+tracing    = { workspace = true }
