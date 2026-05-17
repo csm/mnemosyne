@@ -7,6 +7,7 @@ edition.workspace = true
 [dependencies]
 mnemosyne-code-storage.workspace = true
 mnemosyne-code-search.workspace = true
+mnemosyne-semantic-search.workspace = true
 mnemosyne-execution-engine.workspace = true
 mnemosyne-core-functions.workspace = true
 mnemosyne-code-editor.workspace = true

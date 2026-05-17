@@ -1,34 +1,46 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use serde::Serialize;
+use tokio::sync::Mutex;
+use tracing::warn;
+
+use mnemosyne_code_search::{CodeIndex, IndexedFunction, SearchQuery, SearchResult as FtResult};
+use mnemosyne_execution_engine::ClojureRuntime;
+use mnemosyne_semantic_search::{SemanticIndex, SemanticResult};
+
 use crate::{
     llm::{LlmBackend, LlmRequest, Message, Role},
     tool::{ToolCall, ToolResult},
     Result,
 };
-use mnemosyne_code_search::{CodeIndex, SearchQuery};
-use mnemosyne_execution_engine::ClojureRuntime;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 
 pub struct InferenceEngine {
     llm: Arc<dyn LlmBackend>,
     runtime: Arc<Mutex<ClojureRuntime>>,
     index: Arc<CodeIndex>,
+    semantic: Option<Arc<Mutex<SemanticIndex>>>,
     pub default_model: String,
     pub system_prompt: String,
 }
 
 impl InferenceEngine {
-    pub fn new(
-        llm: Arc<dyn LlmBackend>,
-        runtime: ClojureRuntime,
-        index: CodeIndex,
-    ) -> Self {
+    pub fn new(llm: Arc<dyn LlmBackend>, runtime: ClojureRuntime, index: CodeIndex) -> Self {
         Self {
             llm,
             runtime: Arc::new(Mutex::new(runtime)),
             index: Arc::new(index),
+            semantic: None,
             default_model: "claude-opus-4-7".into(),
             system_prompt: DEFAULT_SYSTEM_PROMPT.into(),
         }
+    }
+
+    /// Attach a semantic index. After this, `search_code` merges full-text and
+    /// semantic results; without it the tool falls back to full-text only.
+    pub fn with_semantic(mut self, index: SemanticIndex) -> Self {
+        self.semantic = Some(Arc::new(Mutex::new(index)));
+        self
     }
 
     /// Run a single-turn prompt, dispatching any tool calls before returning
@@ -50,21 +62,16 @@ impl InferenceEngine {
             let response = self.llm.complete(req).await?;
             let content = response.content.clone();
 
-            // If the response is plain text (no tool calls), we're done.
             if !content.trim_start().starts_with('{') {
                 return Ok(content);
             }
 
-            // Attempt to parse as a tool call batch.
             match serde_json::from_str::<Vec<ToolCall>>(&content) {
                 Ok(calls) => {
                     messages.push(Message::assistant(&content));
                     let results = self.dispatch_tools(&calls).await;
                     let result_json = serde_json::to_string(&results)?;
-                    messages.push(Message {
-                        role: Role::User,
-                        content: result_json,
-                    });
+                    messages.push(Message { role: Role::User, content: result_json });
                 }
                 Err(_) => return Ok(content),
             }
@@ -74,8 +81,7 @@ impl InferenceEngine {
     async fn dispatch_tools(&self, calls: &[ToolCall]) -> Vec<ToolResult> {
         let mut results = Vec::new();
         for call in calls {
-            let result = self.dispatch_single(call).await;
-            results.push(result);
+            results.push(self.dispatch_single(call).await);
         }
         results
     }
@@ -85,11 +91,29 @@ impl InferenceEngine {
             "search_code" => {
                 let query = call.input["query"].as_str().unwrap_or("").to_owned();
                 let limit = call.input["limit"].as_u64().unwrap_or(5) as usize;
-                match self.index.search(&SearchQuery::new(query).with_limit(limit)) {
-                    Ok(results) => ToolResult::ok(&call.id, results),
-                    Err(e) => ToolResult::err(&call.id, e.to_string()),
+
+                let ft = match self.index.search(&SearchQuery::new(&query).with_limit(limit * 2)) {
+                    Ok(r) => r,
+                    Err(e) => return ToolResult::err(&call.id, e.to_string()),
+                };
+
+                let sem = match &self.semantic {
+                    None => None,
+                    Some(idx) => match idx.lock().await.search(&query, limit * 2) {
+                        Ok(r) => Some(r),
+                        Err(e) => {
+                            warn!("semantic search failed: {e}");
+                            None
+                        }
+                    },
+                };
+
+                match sem {
+                    Some(sem) => ToolResult::ok(&call.id, merge_results(ft, sem, limit)),
+                    None => ToolResult::ok(&call.id, ft),
                 }
             }
+
             "eval_clojure" => {
                 let source = call.input["source"].as_str().unwrap_or("").to_owned();
                 let mut rt = self.runtime.lock().await;
@@ -98,15 +122,76 @@ impl InferenceEngine {
                     Err(e) => ToolResult::err(&call.id, e.to_string()),
                 }
             }
+
             "edit_function" => {
-                // Structural edits are applied against in-memory source for now;
-                // persistence back to the repo is handled by code_storage.
                 ToolResult::err(&call.id, "edit_function not yet fully wired")
             }
+
             other => ToolResult::err(&call.id, format!("unknown tool: {other}")),
         }
     }
 }
+
+// ── Result merging ────────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+struct MergedResult {
+    score: f32,
+    /// Where the hit came from: "fulltext", "semantic", or "both".
+    source: &'static str,
+    function: IndexedFunction,
+}
+
+/// Merge full-text and semantic results into a single ranked list.
+///
+/// Both score sets are normalised to [0, 1] before combining so BM25 scores
+/// (unbounded) and cosine similarities (already in [0, 1]) are comparable.
+/// Results appearing in both indexes get `(ft_norm + sem_norm) / 2`; results
+/// appearing in only one get that score directly.
+fn merge_results(ft: Vec<FtResult>, sem: Vec<SemanticResult>, limit: usize) -> Vec<MergedResult> {
+    let ft_max = ft.iter().map(|r| r.score).fold(0f32, f32::max);
+    let sem_max = sem.iter().map(|r| r.score).fold(0f32, f32::max);
+
+    // key -> (ft_score_norm, sem_score_norm, function)
+    let mut map: HashMap<String, (f32, f32, IndexedFunction)> = HashMap::new();
+
+    for r in ft {
+        let key = result_key(&r.function);
+        let score = if ft_max > 0.0 { r.score / ft_max } else { 0.0 };
+        map.insert(key, (score, 0.0, r.function));
+    }
+
+    for r in sem {
+        let key = result_key(&r.function);
+        let score = if sem_max > 0.0 { r.score / sem_max } else { 0.0 };
+        map.entry(key)
+            .and_modify(|(_, s, _)| *s = score)
+            .or_insert((0.0, score, r.function));
+    }
+
+    let mut results: Vec<MergedResult> = map
+        .into_values()
+        .map(|(ft, sem, function)| {
+            let (score, source) = match (ft > 0.0, sem > 0.0) {
+                (true, true) => ((ft + sem) / 2.0, "both"),
+                (true, false) => (ft, "fulltext"),
+                (false, true) => (sem, "semantic"),
+                _ => (0.0, "none"),
+            };
+            MergedResult { score, source, function }
+        })
+        .collect();
+
+    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    results.truncate(limit);
+    results
+}
+
+fn result_key(f: &IndexedFunction) -> String {
+    format!("{}:{}", f.repo, f.name)
+}
+
+// ── Constants ─────────────────────────────────────────────────────────────────
 
 const DEFAULT_SYSTEM_PROMPT: &str = "\
 You are Mnemosyne, an AI programming assistant with access to tools for \
