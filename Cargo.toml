@@ -2,6 +2,7 @@
 members = [
     "mnemosyne-code-storage",
     "mnemosyne-code-search",
+    "mnemosyne-semantic-search",
     "mnemosyne-execution-engine",
     "mnemosyne-core-functions",
     "mnemosyne-code-editor",
@@ -33,6 +34,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Internal crates
 mnemosyne-code-storage    = { path = "mnemosyne-code-storage" }
+mnemosyne-semantic-search = { path = "mnemosyne-semantic-search" }
 mnemosyne-code-search     = { path = "mnemosyne-code-search" }
 mnemosyne-execution-engine = { path = "mnemosyne-execution-engine" }
 mnemosyne-core-functions  = { path = "mnemosyne-core-functions" }
