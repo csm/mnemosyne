@@ -48,7 +48,10 @@ pub fn builtin_tools() -> Vec<Tool> {
     vec![
         Tool {
             name: "search_code".into(),
-            description: "Search indexed repositories for functions matching a natural-language description.".into(),
+            description: "Search indexed repositories for functions matching a query. \
+                Combines full-text (keyword) and semantic (intent-based) search when \
+                the semantic index is loaded; falls back to full-text only otherwise. \
+                Results include a source field: \"fulltext\", \"semantic\", or \"both\".".into(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
