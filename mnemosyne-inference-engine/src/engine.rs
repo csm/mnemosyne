@@ -1,11 +1,14 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde::Serialize;
 use tokio::sync::Mutex;
 use tracing::warn;
 
+use mnemosyne_code_editor::{edit_description, Edit, Editor};
 use mnemosyne_code_search::{CodeIndex, IndexedFunction, SearchQuery, SearchResult as FtResult};
+use mnemosyne_code_storage::CodeRepository;
 use mnemosyne_execution_engine::ClojureRuntime;
 use mnemosyne_semantic_search::{SemanticIndex, SemanticResult};
 
@@ -20,6 +23,9 @@ pub struct InferenceEngine {
     runtime: Arc<Mutex<ClojureRuntime>>,
     index: Arc<CodeIndex>,
     semantic: Option<Arc<Mutex<SemanticIndex>>>,
+    /// Named repositories available for `edit_function`. Key is the repo name
+    /// the LLM uses in tool calls; value is the working-directory path.
+    repos: HashMap<String, PathBuf>,
     pub default_model: String,
     pub system_prompt: String,
 }
@@ -31,6 +37,7 @@ impl InferenceEngine {
             runtime: Arc::new(Mutex::new(runtime)),
             index: Arc::new(index),
             semantic: None,
+            repos: HashMap::new(),
             default_model: "claude-opus-4-7".into(),
             system_prompt: DEFAULT_SYSTEM_PROMPT.into(),
         }
@@ -40,6 +47,13 @@ impl InferenceEngine {
     /// semantic results; without it the tool falls back to full-text only.
     pub fn with_semantic(mut self, index: SemanticIndex) -> Self {
         self.semantic = Some(Arc::new(Mutex::new(index)));
+        self
+    }
+
+    /// Register a named repository for use by `edit_function`.
+    /// `name` is the identifier the LLM passes in the `repo` field.
+    pub fn with_repo(mut self, name: impl Into<String>, workdir: impl Into<PathBuf>) -> Self {
+        self.repos.insert(name.into(), workdir.into());
         self
     }
 
@@ -124,7 +138,54 @@ impl InferenceEngine {
             }
 
             "edit_function" => {
-                ToolResult::err(&call.id, "edit_function not yet fully wired")
+                let repo_name = call.input["repo"].as_str().unwrap_or("").to_owned();
+                let file_path = call.input["file"].as_str().unwrap_or("").to_owned();
+
+                let edit: Edit = match serde_json::from_value(call.input["edit"].clone()) {
+                    Ok(e) => e,
+                    Err(e) => return ToolResult::err(&call.id, format!("invalid edit: {e}")),
+                };
+
+                let workdir = match self.repos.get(&repo_name) {
+                    Some(p) => p.clone(),
+                    None => {
+                        return ToolResult::err(
+                            &call.id,
+                            format!("unknown repo '{repo_name}'; register it with with_repo()"),
+                        )
+                    }
+                };
+
+                let repo = match CodeRepository::open(&workdir) {
+                    Ok(r) => r,
+                    Err(e) => return ToolResult::err(&call.id, e.to_string()),
+                };
+
+                let abs = workdir.join(&file_path);
+                let source = match std::fs::read_to_string(&abs) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        return ToolResult::err(
+                            &call.id,
+                            format!("cannot read {file_path}: {e}"),
+                        )
+                    }
+                };
+
+                let message = format!("{}: {}", edit_description(&edit), file_path);
+                let edits = [edit];
+                let result = match Editor::new(source).apply(&edits) {
+                    Ok(r) => r,
+                    Err(e) => return ToolResult::err(&call.id, e.to_string()),
+                };
+
+                match repo.write_and_commit(&file_path, result.source.as_bytes(), &message, None) {
+                    Ok(oid) => ToolResult::ok(
+                        &call.id,
+                        serde_json::json!({ "commit": oid.to_string(), "file": file_path }),
+                    ),
+                    Err(e) => ToolResult::err(&call.id, e.to_string()),
+                }
             }
 
             other => ToolResult::err(&call.id, format!("unknown tool: {other}")),
@@ -152,7 +213,6 @@ fn merge_results(ft: Vec<FtResult>, sem: Vec<SemanticResult>, limit: usize) -> V
     let ft_max = ft.iter().map(|r| r.score).fold(0f32, f32::max);
     let sem_max = sem.iter().map(|r| r.score).fold(0f32, f32::max);
 
-    // key -> (ft_score_norm, sem_score_norm, function)
     let mut map: HashMap<String, (f32, f32, IndexedFunction)> = HashMap::new();
 
     for r in ft {

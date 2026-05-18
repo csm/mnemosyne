@@ -10,4 +10,6 @@ pub enum StorageError {
     NotFound(String),
     #[error("invalid ref: {0}")]
     InvalidRef(String),
+    #[error("repository has no working directory (bare repository)")]
+    NoWorkdir,
 }
