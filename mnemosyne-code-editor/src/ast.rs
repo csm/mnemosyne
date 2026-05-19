@@ -86,7 +86,10 @@ impl ClojureAst {
             .iter()
             .map(|f| from_reader_form(f, source))
             .collect();
-        Ok(ClojureAst { source: source.to_owned(), top_level })
+        Ok(ClojureAst {
+            source: source.to_owned(),
+            top_level,
+        })
     }
 
     /// Find a top-level `defn` by name.
@@ -101,7 +104,10 @@ impl ClojureAst {
 // ── Conversion from cljrs-reader Form ────────────────────────────────────────
 
 fn from_reader_form(f: &cljrs_reader::Form, source: &str) -> Form {
-    let span = Span { start: f.span.start, end: f.span.end };
+    let span = Span {
+        start: f.span.start,
+        end: f.span.end,
+    };
     let text = source[span.start..span.end].to_owned();
 
     let (kind, children) = match &f.kind {
@@ -142,7 +148,12 @@ fn from_reader_form(f: &cljrs_reader::Form, source: &str) -> Form {
         _ => (FormKind::Number, vec![]),
     };
 
-    Form { kind, span, text, children }
+    Form {
+        kind,
+        span,
+        text,
+        children,
+    }
 }
 
 fn map_children(cs: &[cljrs_reader::Form], source: &str) -> Vec<Form> {

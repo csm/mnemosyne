@@ -25,7 +25,11 @@ pub struct Zipper {
 
 impl Zipper {
     pub fn new(root: Form, source: String) -> Self {
-        Self { focus: root, crumbs: vec![], source }
+        Self {
+            focus: root,
+            crumbs: vec![],
+            source,
+        }
     }
 
     // ── Navigation ────────────────────────────────────────────────────────────
@@ -54,7 +58,11 @@ impl Zipper {
             parent_span: self.focus.span,
             parent_text: self.focus.text,
         });
-        Some(Self { focus: first, crumbs: self.crumbs, source: self.source })
+        Some(Self {
+            focus: first,
+            crumbs: self.crumbs,
+            source: self.source,
+        })
     }
 
     /// Move to the next sibling (right).
@@ -65,7 +73,11 @@ impl Zipper {
         }
         let next = crumb.right.remove(0);
         crumb.left.push(self.focus);
-        Some(Self { focus: next, crumbs: self.crumbs, source: self.source })
+        Some(Self {
+            focus: next,
+            crumbs: self.crumbs,
+            source: self.source,
+        })
     }
 
     /// Move to the previous sibling (left).
@@ -73,7 +85,11 @@ impl Zipper {
         let crumb = self.crumbs.last_mut()?;
         let prev = crumb.left.pop()?;
         crumb.right.insert(0, self.focus);
-        Some(Self { focus: prev, crumbs: self.crumbs, source: self.source })
+        Some(Self {
+            focus: prev,
+            crumbs: self.crumbs,
+            source: self.source,
+        })
     }
 
     /// Move up to the parent.
@@ -88,7 +104,11 @@ impl Zipper {
             text: crumb.parent_text,
             children,
         };
-        Some(Self { focus: parent, crumbs: self.crumbs, source: self.source })
+        Some(Self {
+            focus: parent,
+            crumbs: self.crumbs,
+            source: self.source,
+        })
     }
 
     // ── Search ────────────────────────────────────────────────────────────────
@@ -107,7 +127,10 @@ impl Zipper {
         let span = self.focus.span;
         self.focus = Form {
             kind: self.focus.kind,
-            span: Span { start: span.start, end: span.start }, // sentinel: zero-length
+            span: Span {
+                start: span.start,
+                end: span.start,
+            }, // sentinel: zero-length
             text: new_text,
             children: vec![],
         };
@@ -227,7 +250,10 @@ mod tests {
         // Wrap top-level forms in a synthetic root so navigation works.
         let root = Form {
             kind: FormKind::List,
-            span: Span { start: 0, end: src.len() },
+            span: Span {
+                start: 0,
+                end: src.len(),
+            },
             text: src.to_owned(),
             children: ast.top_level,
         };
@@ -255,7 +281,10 @@ mod tests {
         let ast = ClojureAst::parse(src).unwrap();
         let root = Form {
             kind: FormKind::List,
-            span: Span { start: 0, end: src.len() },
+            span: Span {
+                start: 0,
+                end: src.len(),
+            },
             text: src.to_owned(),
             children: ast.top_level,
         };

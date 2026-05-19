@@ -51,7 +51,10 @@ impl CodeRepository {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         let inner = GitRepo::open(path)?;
-        Ok(Self { inner, source: RepoSource::Local(path.to_owned()) })
+        Ok(Self {
+            inner,
+            source: RepoSource::Local(path.to_owned()),
+        })
     }
 
     /// Clone a remote repository to `dest`.
@@ -61,7 +64,10 @@ impl CodeRepository {
         let inner = GitRepo::clone(url, dest)?;
         Ok(Self {
             inner,
-            source: RepoSource::Remote { url: url.to_owned(), local_path: dest.to_owned() },
+            source: RepoSource::Remote {
+                url: url.to_owned(),
+                local_path: dest.to_owned(),
+            },
         })
     }
 
@@ -89,7 +95,10 @@ impl CodeRepository {
                 if let Ok(obj) = entry.to_object(&self.inner) {
                     if let Some(blob) = obj.as_blob() {
                         let path = PathBuf::from(root).join(entry.name().unwrap_or(""));
-                        entries.push(FileEntry { path, content: blob.content().to_vec() });
+                        entries.push(FileEntry {
+                            path,
+                            content: blob.content().to_vec(),
+                        });
                     }
                 }
             }
@@ -103,11 +112,7 @@ impl CodeRepository {
 
     /// Write `content` to `rel_path` inside the working directory, creating
     /// any missing parent directories. Does **not** stage or commit.
-    pub fn write_file(
-        &self,
-        rel_path: impl AsRef<Path>,
-        content: impl AsRef<[u8]>,
-    ) -> Result<()> {
+    pub fn write_file(&self, rel_path: impl AsRef<Path>, content: impl AsRef<[u8]>) -> Result<()> {
         let workdir = self.inner.workdir().ok_or(StorageError::NoWorkdir)?;
         let abs = workdir.join(rel_path.as_ref());
         if let Some(parent) = abs.parent() {
@@ -141,20 +146,19 @@ impl CodeRepository {
 
         let sig = match author {
             Some(a) => git2::Signature::now(&a.name, &a.email)?,
-            None => self
-                .inner
-                .signature()
-                .unwrap_or_else(|_| {
-                    let d = CommitAuthor::default();
-                    git2::Signature::now(&d.name, &d.email).unwrap()
-                }),
+            None => self.inner.signature().unwrap_or_else(|_| {
+                let d = CommitAuthor::default();
+                git2::Signature::now(&d.name, &d.email).unwrap()
+            }),
         };
 
         // The first commit has no parent; all others point at HEAD.
         let parent = self.inner.head().ok().and_then(|h| h.peel_to_commit().ok());
         let parents: Vec<&git2::Commit<'_>> = parent.iter().collect();
 
-        let oid = self.inner.commit(Some("HEAD"), &sig, &sig, message, &tree, &parents)?;
+        let oid = self
+            .inner
+            .commit(Some("HEAD"), &sig, &sig, message, &tree, &parents)?;
         tracing::info!(oid = %oid, "committed {} path(s)", rel_paths.len());
         Ok(oid)
     }
@@ -207,10 +211,18 @@ mod tests {
     #[test]
     fn write_and_commit_round_trips_content() {
         let (_dir, repo) = init_repo();
-        let author = CommitAuthor { name: "Bot".into(), email: "bot@test".into() };
+        let author = CommitAuthor {
+            name: "Bot".into(),
+            email: "bot@test".into(),
+        };
 
         let oid = repo
-            .write_and_commit("fn/retry.clj", "(defn retry [])", "add retry", Some(&author))
+            .write_and_commit(
+                "fn/retry.clj",
+                "(defn retry [])",
+                "add retry",
+                Some(&author),
+            )
             .unwrap();
 
         // The commit should be reachable from HEAD.
@@ -219,7 +231,10 @@ mod tests {
 
         // Content should round-trip through files_at_rev.
         let files = repo.files_at_rev("HEAD").unwrap();
-        let file = files.iter().find(|f| f.path.to_str() == Some("fn/retry.clj")).unwrap();
+        let file = files
+            .iter()
+            .find(|f| f.path.to_str() == Some("fn/retry.clj"))
+            .unwrap();
         assert_eq!(file.content_str().unwrap(), "(defn retry [])");
     }
 
@@ -229,7 +244,8 @@ mod tests {
 
         repo.write_file("a.clj", b"(ns a)").unwrap();
         repo.write_file("b.clj", b"(ns b)").unwrap();
-        repo.commit(&["a.clj", "b.clj"], "add a and b", None).unwrap();
+        repo.commit(&["a.clj", "b.clj"], "add a and b", None)
+            .unwrap();
 
         let files = repo.files_at_rev("HEAD").unwrap();
         assert_eq!(files.len(), 2);
@@ -239,8 +255,11 @@ mod tests {
     fn second_commit_becomes_child_of_first() {
         let (_dir, repo) = init_repo();
 
-        repo.write_and_commit("a.clj", b"v1", "first", None).unwrap();
-        let oid2 = repo.write_and_commit("a.clj", b"v2", "second", None).unwrap();
+        repo.write_and_commit("a.clj", b"v1", "first", None)
+            .unwrap();
+        let oid2 = repo
+            .write_and_commit("a.clj", b"v2", "second", None)
+            .unwrap();
 
         let commit2 = repo.inner.find_commit(oid2).unwrap();
         assert_eq!(commit2.parent_count(), 1);

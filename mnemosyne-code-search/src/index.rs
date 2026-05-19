@@ -83,11 +83,19 @@ impl CodeIndex {
     }
 
     /// Index all Clojure files from a `CodeRepository` at HEAD.
-    pub fn index_repository(&self, repo: &mnemosyne_code_storage::CodeRepository, repo_name: &str) -> Result<()> {
+    pub fn index_repository(
+        &self,
+        repo: &mnemosyne_code_storage::CodeRepository,
+        repo_name: &str,
+    ) -> Result<()> {
         let files = repo.files_at_rev("HEAD")?;
         let fns: Vec<IndexedFunction> = files
             .iter()
-            .filter(|f| f.path.extension().map_or(false, |e| e == "clj" || e == "cljc" || e == "cljs"))
+            .filter(|f| {
+                f.path
+                    .extension()
+                    .is_some_and(|e| e == "clj" || e == "cljc" || e == "cljs")
+            })
             .filter_map(|f| {
                 let content = f.content_str()?;
                 Some(IndexedFunction {

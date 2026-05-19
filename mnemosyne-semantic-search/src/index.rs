@@ -37,13 +37,20 @@ pub struct SemanticIndex {
 
 impl SemanticIndex {
     pub fn new(embedder: Embedder) -> Self {
-        Self { embedder, vectors: Vec::new(), entries: Vec::new() }
+        Self {
+            embedder,
+            vectors: Vec::new(),
+            entries: Vec::new(),
+        }
     }
 
     /// Open a previously saved index from `dir`, or create an empty one.
-    pub fn open_or_create(dir: impl AsRef<Path>, embedder: Embedder) -> Result<Self, SemanticSearchError> {
+    pub fn open_or_create(
+        dir: impl AsRef<Path>,
+        embedder: Embedder,
+    ) -> Result<Self, SemanticSearchError> {
         let dir = dir.as_ref();
-        let meta_path    = dir.join("metadata.json");
+        let meta_path = dir.join("metadata.json");
         let vectors_path = dir.join("vectors.bin");
 
         if meta_path.exists() && vectors_path.exists() {
@@ -85,7 +92,7 @@ impl SemanticIndex {
             .filter(|f| {
                 f.path
                     .extension()
-                    .map_or(false, |e| e == "clj" || e == "cljc" || e == "cljs")
+                    .is_some_and(|e| e == "clj" || e == "cljc" || e == "cljs")
             })
             .filter_map(|f| {
                 let content = f.content_str()?;
@@ -104,7 +111,11 @@ impl SemanticIndex {
     }
 
     /// Return the `top_k` most similar functions for the given intent string.
-    pub fn search(&self, intent: &str, top_k: usize) -> Result<Vec<SemanticResult>, SemanticSearchError> {
+    pub fn search(
+        &self,
+        intent: &str,
+        top_k: usize,
+    ) -> Result<Vec<SemanticResult>, SemanticSearchError> {
         if self.vectors.is_empty() {
             return Err(SemanticSearchError::EmptyIndex);
         }
@@ -192,13 +203,17 @@ impl SemanticIndex {
         }
 
         info!(dir = %dir.display(), entries = entries.len(), "loaded semantic index");
-        Ok(Self { embedder, vectors, entries })
+        Ok(Self {
+            embedder,
+            vectors,
+            entries,
+        })
     }
 }
 
 // ── Math helpers ─────────────────────────────────────────────────────────────
 
-fn normalize(v: &mut Vec<f32>) {
+fn normalize(v: &mut [f32]) {
     let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
     if norm > 1e-9 {
         for x in v.iter_mut() {

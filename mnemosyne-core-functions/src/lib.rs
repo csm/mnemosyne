@@ -4,7 +4,7 @@ pub mod registry;
 
 pub use error::CoreError;
 pub use loader::load_core;
-pub use registry::{FunctionTemplate, FunctionRegistry};
+pub use registry::{FunctionRegistry, FunctionTemplate};
 
 pub type Result<T> = std::result::Result<T, CoreError>;
 
