@@ -4,8 +4,8 @@ use std::sync::Arc;
 use clap::Parser;
 use mnemosyne_code_search::CodeIndex;
 use mnemosyne_execution_engine::ClojureRuntime;
-use mnemosyne_inference_engine::InferenceEngine;
-use mnemosyne_interface::{run_server, AnthropicBackend, ServerConfig};
+use mnemosyne_inference_engine::{InferenceEngine, LlmBackend};
+use mnemosyne_interface::{run_server, AnthropicBackend, OpenAiCompatBackend, ServerConfig};
 use mnemosyne_memory::MemoryStore;
 use tracing_subscriber::EnvFilter;
 
@@ -13,18 +13,29 @@ use tracing_subscriber::EnvFilter;
 #[command(
     name = "mnemosyne",
     about = "Mnemosyne agent — HTTP/SSE chat interface",
-    long_about = None
+    long_about = "\
+Starts an HTTP server with a chat UI at GET / and a streaming SSE endpoint at \
+POST /api/chat.\n\n\
+Backend selection (pick one):\n  \
+  --api-key / ANTHROPIC_API_KEY  →  Anthropic Messages API\n  \
+  --base-url                     →  any OpenAI-compatible server\n                               \
+     (Ollama, llama.cpp, LM Studio, …)"
 )]
 struct Args {
     /// Address to listen on.
     #[arg(short, long, default_value = "127.0.0.1:3000", env = "MNEMOSYNE_BIND")]
     bind: std::net::SocketAddr,
 
-    /// Anthropic API key. Falls back to ANTHROPIC_API_KEY env var.
+    /// Anthropic API key. Required when --base-url is not set.
     #[arg(long, env = "ANTHROPIC_API_KEY")]
-    api_key: String,
+    api_key: Option<String>,
 
-    /// LLM model name sent to the Anthropic API.
+    /// OpenAI-compatible base URL, e.g. http://localhost:11434/v1 (Ollama)
+    /// or http://localhost:8080/v1 (llama.cpp). When set, --api-key is optional.
+    #[arg(long, env = "MNEMOSYNE_BASE_URL")]
+    base_url: Option<String>,
+
+    /// LLM model name passed through to the backend.
     #[arg(
         short,
         long,
@@ -39,7 +50,7 @@ struct Args {
     memory_dir: Option<PathBuf>,
 
     /// Directory for the Tantivy code index.
-    /// Defaults to a directory named `mnemosyne-index` inside the system temp dir.
+    /// Defaults to a `mnemosyne-index` folder inside the system temp dir.
     #[arg(long, env = "MNEMOSYNE_INDEX_DIR")]
     index_dir: Option<PathBuf>,
 }
@@ -56,7 +67,24 @@ async fn main() -> anyhow::Result<()> {
 
     let args = Args::parse();
 
-    let llm = Arc::new(AnthropicBackend::new(&args.api_key));
+    let llm: Arc<dyn LlmBackend> = match (args.base_url, args.api_key) {
+        (Some(url), key) => {
+            let key = key.unwrap_or_else(|| "local".to_owned());
+            tracing::info!("using OpenAI-compatible backend at {url}");
+            Arc::new(OpenAiCompatBackend::new(url, key))
+        }
+        (None, Some(key)) => {
+            tracing::info!("using Anthropic backend");
+            Arc::new(AnthropicBackend::new(key))
+        }
+        (None, None) => {
+            anyhow::bail!(
+                "no LLM backend configured — provide --api-key (Anthropic) \
+                 or --base-url (OpenAI-compatible local server)"
+            );
+        }
+    };
+
     let runtime = ClojureRuntime::minimal();
 
     let index_dir = args
