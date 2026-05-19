@@ -1,6 +1,8 @@
 use crate::{CodeIndex, IndexedFunction, Result};
 use serde::{Deserialize, Serialize};
-use tantivy::{collector::TopDocs, query::QueryParser, schema::Value, ReloadPolicy, TantivyDocument};
+use tantivy::{
+    collector::TopDocs, query::QueryParser, schema::Value, ReloadPolicy, TantivyDocument,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchQuery {
@@ -11,7 +13,10 @@ pub struct SearchQuery {
 
 impl SearchQuery {
     pub fn new(text: impl Into<String>) -> Self {
-        Self { text: text.into(), limit: 10 }
+        Self {
+            text: text.into(),
+            limit: 10,
+        }
     }
 
     pub fn with_limit(mut self, n: usize) -> Self {
@@ -37,11 +42,7 @@ impl CodeIndex {
 
         let parser = QueryParser::for_index(
             &self.index,
-            vec![
-                self.schema.name,
-                self.schema.docstring,
-                self.schema.body,
-            ],
+            vec![self.schema.name, self.schema.docstring, self.schema.body],
         );
         let query = parser.parse_query(&q.text)?;
         let top = searcher.search(&query, &TopDocs::with_limit(q.limit))?;
@@ -65,7 +66,11 @@ impl CodeIndex {
                         name: get(s.name),
                         docstring: {
                             let d = get(s.docstring);
-                            if d.is_empty() { None } else { Some(d) }
+                            if d.is_empty() {
+                                None
+                            } else {
+                                Some(d)
+                            }
                         },
                         body: get(s.body),
                     },

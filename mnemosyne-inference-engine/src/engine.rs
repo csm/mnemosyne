@@ -85,7 +85,10 @@ impl InferenceEngine {
                     messages.push(Message::assistant(&content));
                     let results = self.dispatch_tools(&calls).await;
                     let result_json = serde_json::to_string(&results)?;
-                    messages.push(Message { role: Role::User, content: result_json });
+                    messages.push(Message {
+                        role: Role::User,
+                        content: result_json,
+                    });
                 }
                 Err(_) => return Ok(content),
             }
@@ -106,7 +109,10 @@ impl InferenceEngine {
                 let query = call.input["query"].as_str().unwrap_or("").to_owned();
                 let limit = call.input["limit"].as_u64().unwrap_or(5) as usize;
 
-                let ft = match self.index.search(&SearchQuery::new(&query).with_limit(limit * 2)) {
+                let ft = match self
+                    .index
+                    .search(&SearchQuery::new(&query).with_limit(limit * 2))
+                {
                     Ok(r) => r,
                     Err(e) => return ToolResult::err(&call.id, e.to_string()),
                 };
@@ -165,10 +171,7 @@ impl InferenceEngine {
                 let source = match std::fs::read_to_string(&abs) {
                     Ok(s) => s,
                     Err(e) => {
-                        return ToolResult::err(
-                            &call.id,
-                            format!("cannot read {file_path}: {e}"),
-                        )
+                        return ToolResult::err(&call.id, format!("cannot read {file_path}: {e}"))
                     }
                 };
 
@@ -223,7 +226,11 @@ fn merge_results(ft: Vec<FtResult>, sem: Vec<SemanticResult>, limit: usize) -> V
 
     for r in sem {
         let key = result_key(&r.function);
-        let score = if sem_max > 0.0 { r.score / sem_max } else { 0.0 };
+        let score = if sem_max > 0.0 {
+            r.score / sem_max
+        } else {
+            0.0
+        };
         map.entry(key)
             .and_modify(|(_, s, _)| *s = score)
             .or_insert((0.0, score, r.function));
@@ -238,11 +245,19 @@ fn merge_results(ft: Vec<FtResult>, sem: Vec<SemanticResult>, limit: usize) -> V
                 (false, true) => (sem, "semantic"),
                 _ => (0.0, "none"),
             };
-            MergedResult { score, source, function }
+            MergedResult {
+                score,
+                source,
+                function,
+            }
         })
         .collect();
 
-    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    results.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     results.truncate(limit);
     results
 }

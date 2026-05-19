@@ -41,17 +41,17 @@ pub enum EmbedModel {
 impl EmbedModel {
     pub fn hf_id(self) -> &'static str {
         match self {
-            EmbedModel::BgeBase    => "BAAI/bge-base-en-v1.5",
+            EmbedModel::BgeBase => "BAAI/bge-base-en-v1.5",
             EmbedModel::JinaCodeV2 => "jinaai/jina-embeddings-v2-base-code",
-            EmbedModel::NomicText  => "nomic-ai/nomic-embed-text-v1.5",
+            EmbedModel::NomicText => "nomic-ai/nomic-embed-text-v1.5",
         }
     }
 
     fn pooling(self) -> Pooling {
         match self {
-            EmbedModel::BgeBase    => Pooling::Cls,
+            EmbedModel::BgeBase => Pooling::Cls,
             EmbedModel::JinaCodeV2 => Pooling::Mean,
-            EmbedModel::NomicText  => Pooling::Mean,
+            EmbedModel::NomicText => Pooling::Mean,
         }
     }
 }
@@ -85,8 +85,7 @@ impl Embedder {
         let tokenizer = Tokenizer::from_file(tokenizer_path)
             .map_err(|e| SemanticSearchError::Embed(e.to_string()))?;
 
-        let config: BertConfig =
-            serde_json::from_str(&std::fs::read_to_string(config_path)?)?;
+        let config: BertConfig = serde_json::from_str(&std::fs::read_to_string(config_path)?)?;
 
         let vb = unsafe {
             VarBuilder::from_mmaped_safetensors(&[weights_path], DType::F32, &device)
@@ -96,7 +95,12 @@ impl Embedder {
         let model =
             BertModel::load(vb, &config).map_err(|e| SemanticSearchError::Embed(e.to_string()))?;
 
-        Ok(Self { model, tokenizer, pooling: which.pooling(), device })
+        Ok(Self {
+            model,
+            tokenizer,
+            pooling: which.pooling(),
+            device,
+        })
     }
 
     /// Embed a batch of strings. Returns one L2-unnormalised vector per input.
@@ -106,12 +110,13 @@ impl Embedder {
             .encode_batch(texts, true)
             .map_err(|e| SemanticSearchError::Embed(e.to_string()))?;
 
-        let input_ids: Vec<Vec<u32>> =
-            encoded.iter().map(|e| e.get_ids().to_vec()).collect();
+        let input_ids: Vec<Vec<u32>> = encoded.iter().map(|e| e.get_ids().to_vec()).collect();
         let token_type_ids: Vec<Vec<u32>> =
             encoded.iter().map(|e| e.get_type_ids().to_vec()).collect();
-        let attention_mask: Vec<Vec<u32>> =
-            encoded.iter().map(|e| e.get_attention_mask().to_vec()).collect();
+        let attention_mask: Vec<Vec<u32>> = encoded
+            .iter()
+            .map(|e| e.get_attention_mask().to_vec())
+            .collect();
 
         let ids = Tensor::new(input_ids, &self.device)
             .map_err(|e| SemanticSearchError::Embed(e.to_string()))?;
@@ -157,7 +162,11 @@ impl Embedder {
 /// on what the function actually does.
 pub fn embed_text(f: &IndexedFunction) -> String {
     let doc = f.docstring.as_deref().unwrap_or("");
-    let body = if f.body.len() > 2048 { &f.body[..2048] } else { &f.body };
+    let body = if f.body.len() > 2048 {
+        &f.body[..2048]
+    } else {
+        &f.body
+    };
     if doc.is_empty() {
         format!("{}\n{}", f.name, body)
     } else {
