@@ -8,6 +8,7 @@ members = [
     "mnemosyne-code-editor",
     "mnemosyne-inference-engine",
     "mnemosyne-memory",
+    "mnemosyne-interface",
 ]
 resolver = "2"
 
@@ -42,3 +43,4 @@ mnemosyne-core-functions  = { path = "mnemosyne-core-functions" }
 mnemosyne-code-editor     = { path = "mnemosyne-code-editor" }
 mnemosyne-inference-engine = { path = "mnemosyne-inference-engine" }
 mnemosyne-memory           = { path = "mnemosyne-memory" }
+mnemosyne-interface        = { path = "mnemosyne-interface" }
