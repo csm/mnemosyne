@@ -10,6 +10,7 @@ use mnemosyne_code_editor::{edit_description, Edit, Editor};
 use mnemosyne_code_search::{CodeIndex, IndexedFunction, SearchQuery, SearchResult as FtResult};
 use mnemosyne_code_storage::CodeRepository;
 use mnemosyne_execution_engine::ClojureRuntime;
+use mnemosyne_memory::{EpisodeKind, MemoryStore};
 use mnemosyne_semantic_search::{SemanticIndex, SemanticResult};
 
 use crate::{
@@ -26,6 +27,7 @@ pub struct InferenceEngine {
     /// Named repositories available for `edit_function`. Key is the repo name
     /// the LLM uses in tool calls; value is the working-directory path.
     repos: HashMap<String, PathBuf>,
+    memory: Option<Arc<Mutex<MemoryStore>>>,
     pub default_model: String,
     pub system_prompt: String,
 }
@@ -38,6 +40,7 @@ impl InferenceEngine {
             index: Arc::new(index),
             semantic: None,
             repos: HashMap::new(),
+            memory: None,
             default_model: "claude-opus-4-7".into(),
             system_prompt: DEFAULT_SYSTEM_PROMPT.into(),
         }
@@ -57,12 +60,27 @@ impl InferenceEngine {
         self
     }
 
+    /// Attach an episodic memory store. When set, every user message, tool
+    /// call, and assistant reply is appended to the store automatically.
+    pub fn with_memory(mut self, store: MemoryStore) -> Self {
+        self.memory = Some(Arc::new(Mutex::new(store)));
+        self
+    }
+
     /// Run a single-turn prompt, dispatching any tool calls before returning
     /// the final assistant response.
     pub async fn run(&self, user_message: impl Into<String>) -> Result<String> {
+        let user_message = user_message.into();
+
+        if let Some(mem) = &self.memory {
+            let _ = mem.lock().await.log(EpisodeKind::UserMessage {
+                content: user_message.clone(),
+            });
+        }
+
         let mut messages = vec![
             Message::system(&self.system_prompt),
-            Message::user(user_message.into()),
+            Message::user(&user_message),
         ];
 
         loop {
@@ -77,6 +95,11 @@ impl InferenceEngine {
             let content = response.content.clone();
 
             if !content.trim_start().starts_with('{') {
+                if let Some(mem) = &self.memory {
+                    let _ = mem.lock().await.log(EpisodeKind::AssistantReply {
+                        content: content.clone(),
+                    });
+                }
                 return Ok(content);
             }
 
@@ -90,7 +113,14 @@ impl InferenceEngine {
                         content: result_json,
                     });
                 }
-                Err(_) => return Ok(content),
+                Err(_) => {
+                    if let Some(mem) = &self.memory {
+                        let _ = mem.lock().await.log(EpisodeKind::AssistantReply {
+                            content: content.clone(),
+                        });
+                    }
+                    return Ok(content);
+                }
             }
         }
     }
@@ -104,6 +134,29 @@ impl InferenceEngine {
     }
 
     async fn dispatch_single(&self, call: &ToolCall) -> ToolResult {
+        // Log the tool call before dispatching.
+        if let Some(mem) = &self.memory {
+            let _ = mem.lock().await.log(EpisodeKind::ToolCall {
+                tool: call.name.clone(),
+                input: call.input.clone(),
+            });
+        }
+
+        let result = self.execute_tool(call).await;
+
+        // Log the result.
+        if let Some(mem) = &self.memory {
+            let _ = mem.lock().await.log(EpisodeKind::ToolResult {
+                tool: call.name.clone(),
+                success: !result.is_error,
+                output: result.output.to_string(),
+            });
+        }
+
+        result
+    }
+
+    async fn execute_tool(&self, call: &ToolCall) -> ToolResult {
         match call.name.as_str() {
             "search_code" => {
                 let query = call.input["query"].as_str().unwrap_or("").to_owned();
@@ -188,6 +241,21 @@ impl InferenceEngine {
                         serde_json::json!({ "commit": oid.to_string(), "file": file_path }),
                     ),
                     Err(e) => ToolResult::err(&call.id, e.to_string()),
+                }
+            }
+
+            "recall_memory" => {
+                let limit = call.input["limit"].as_u64().unwrap_or(10) as usize;
+                match &self.memory {
+                    None => ToolResult::err(&call.id, "memory not configured"),
+                    Some(mem) => {
+                        let store = mem.lock().await;
+                        let recent = store.recent(limit).to_vec();
+                        match serde_json::to_value(&recent) {
+                            Ok(v) => ToolResult::ok(&call.id, v),
+                            Err(e) => ToolResult::err(&call.id, e.to_string()),
+                        }
+                    }
                 }
             }
 

@@ -70,6 +70,20 @@ impl ClojureRuntime {
     pub fn globals(&self) -> &Arc<GlobalEnv> {
         &self.globals
     }
+
+    /// Return the names of all vars interned in the current namespace.
+    ///
+    /// This captures user-defined `def`/`defn` bindings (not `clojure.core`
+    /// refers). Returns an empty vec if the namespace has no user-defined vars.
+    pub fn binding_names(&self) -> Vec<String> {
+        let ns_name = &*self.env.current_ns;
+        let namespaces = self.globals.namespaces.read().unwrap();
+        let Some(ns_ptr) = namespaces.get(ns_name) else {
+            return vec![];
+        };
+        let interns = ns_ptr.get().interns.lock().unwrap();
+        interns.keys().map(|k| k.to_string()).collect()
+    }
 }
 
 impl Default for ClojureRuntime {
