@@ -1,3 +1,4 @@
+use crate::ast::{ClojureAst, Form, FormKind};
 use crate::{EditorError, Result};
 use serde::{Deserialize, Serialize};
 
@@ -10,12 +11,19 @@ pub enum Edit {
     PrependToBody { fn_name: String, form: String },
     /// Wrap the body of a `defn` with an outer form.
     /// The body is placed between `wrapper_prefix` and `wrapper_suffix`.
-    WrapBody { fn_name: String, wrapper_prefix: String, wrapper_suffix: String },
+    WrapBody {
+        fn_name: String,
+        wrapper_prefix: String,
+        wrapper_suffix: String,
+    },
     /// Rename a `defn` declaration (call sites are not updated).
     Rename { old_name: String, new_name: String },
     /// Insert a new top-level form after the named `defn`, or at end of file
     /// when `anchor` is `None`.
-    InsertAfter { anchor: Option<String>, form: String },
+    InsertAfter {
+        anchor: Option<String>,
+        form: String,
+    },
 }
 
 /// The outcome of applying one or more edits.
@@ -32,7 +40,9 @@ pub struct Editor {
 
 impl Editor {
     pub fn new(source: impl Into<String>) -> Self {
-        Self { source: source.into() }
+        Self {
+            source: source.into(),
+        }
     }
 
     /// Apply a sequence of edits in order, re-parsing between each.
@@ -43,7 +53,10 @@ impl Editor {
             source = apply_single(&source, edit)?;
             applied += 1;
         }
-        Ok(EditResult { source, edits_applied: applied })
+        Ok(EditResult {
+            source,
+            edits_applied: applied,
+        })
     }
 }
 
@@ -51,28 +64,173 @@ impl Editor {
 
 pub fn edit_description(edit: &Edit) -> String {
     match edit {
-        Edit::ReplaceBody { fn_name, .. }   => format!("replace body of {fn_name}"),
+        Edit::ReplaceBody { fn_name, .. } => format!("replace body of {fn_name}"),
         Edit::PrependToBody { fn_name, .. } => format!("prepend form to {fn_name}"),
-        Edit::WrapBody { fn_name, .. }      => format!("wrap body of {fn_name}"),
+        Edit::WrapBody { fn_name, .. } => format!("wrap body of {fn_name}"),
         Edit::Rename { old_name, new_name } => format!("rename {old_name} -> {new_name}"),
-        Edit::InsertAfter { anchor: None, .. }         => "insert form at end".into(),
-        Edit::InsertAfter { anchor: Some(name), .. }   => format!("insert after {name}"),
+        Edit::InsertAfter { anchor: None, .. } => "insert form at end".into(),
+        Edit::InsertAfter {
+            anchor: Some(name), ..
+        } => format!("insert after {name}"),
     }
 }
 
 // ── Core edit dispatch ────────────────────────────────────────────────────────
 
 fn apply_single(source: &str, edit: &Edit) -> Result<String> {
+    // Try the AST-driven path first; fall back to byte-scanning if parse fails.
+    match apply_via_ast(source, edit) {
+        Ok(result) => return Ok(result),
+        Err(EditorError::Parse(_)) => {} // fall through to legacy path
+        Err(e) => return Err(e),
+    }
+    apply_via_scan(source, edit)
+}
+
+// ── AST-driven edits ──────────────────────────────────────────────────────────
+
+fn apply_via_ast(source: &str, edit: &Edit) -> Result<String> {
+    let ast = ClojureAst::parse(source)?;
+
+    match edit {
+        Edit::ReplaceBody { fn_name, new_body } => {
+            let defn = ast
+                .find_defn(fn_name)
+                .ok_or_else(|| EditorError::NotFound(fn_name.clone()))?;
+            let (args_end, defn_end) = body_bounds(defn, fn_name)?;
+            Ok(format!(
+                "{}\n  {new_body}\n{}",
+                &source[..args_end],
+                &source[defn_end - 1..],
+            ))
+        }
+
+        Edit::PrependToBody { fn_name, form } => {
+            let defn = ast
+                .find_defn(fn_name)
+                .ok_or_else(|| EditorError::NotFound(fn_name.clone()))?;
+            let (args_end, _) = body_bounds(defn, fn_name)?;
+            Ok(format!(
+                "{}\n  {form}{}",
+                &source[..args_end],
+                &source[args_end..],
+            ))
+        }
+
+        Edit::WrapBody {
+            fn_name,
+            wrapper_prefix,
+            wrapper_suffix,
+        } => {
+            let defn = ast
+                .find_defn(fn_name)
+                .ok_or_else(|| EditorError::NotFound(fn_name.clone()))?;
+            let (args_end, defn_end) = body_bounds(defn, fn_name)?;
+            let body = source[args_end..defn_end - 1].trim();
+            Ok(format!(
+                "{}\n  {wrapper_prefix}{body}{wrapper_suffix}\n{}",
+                &source[..args_end],
+                &source[defn_end - 1..],
+            ))
+        }
+
+        Edit::Rename { old_name, new_name } => {
+            let defn = ast
+                .find_defn(old_name)
+                .ok_or_else(|| EditorError::NotFound(old_name.clone()))?;
+            let name_form = name_child(defn)
+                .ok_or_else(|| EditorError::InvalidEdit(format!("no name in defn {old_name}")))?;
+            Ok(format!(
+                "{}{new_name}{}",
+                &source[..name_form.span.start],
+                &source[name_form.span.end..],
+            ))
+        }
+
+        Edit::InsertAfter { anchor: None, form } => Ok(format!("{}\n\n{form}", source.trim_end())),
+
+        Edit::InsertAfter {
+            anchor: Some(name),
+            form,
+        } => {
+            let defn = ast
+                .find_defn(name)
+                .ok_or_else(|| EditorError::NotFound(name.clone()))?;
+            let defn_end = defn.span.end;
+            Ok(format!(
+                "{}\n\n{form}{}",
+                &source[..defn_end],
+                &source[defn_end..],
+            ))
+        }
+    }
+}
+
+// ── AST span helpers ──────────────────────────────────────────────────────────
+
+/// Return `(args_vec_end, defn_end)` for a defn Form.
+///
+/// Handles both single-arity `(defn f [x] body)` and multi-arity
+/// `(defn f ([x] body) ([x y] body))`. For multi-arity, body_bounds
+/// returns the end of the first arity clause's args vec and the closing
+/// paren of the entire defn — callers that need per-arity work should
+/// call `arity_bounds` directly.
+fn body_bounds(defn: &Form, fn_name: &str) -> Result<(usize, usize)> {
+    // Find the args vector: it is the first Vector child of the defn List
+    // (single-arity) OR the first Vector inside the first List child that
+    // follows the name symbol (multi-arity).
+    let args_vec = args_vec_form(defn)
+        .ok_or_else(|| EditorError::InvalidEdit(format!("no argument vector in {fn_name}")))?;
+    Ok((args_vec.span.end, defn.span.end))
+}
+
+/// Find the `[args]` Vector form within a defn.
+fn args_vec_form(defn: &Form) -> Option<&Form> {
+    // Single-arity: direct Vector child after the name.
+    for child in &defn.children {
+        if child.kind == FormKind::Vector {
+            return Some(child);
+        }
+        // Multi-arity: first List child after name/docstring contains the Vector.
+        if child.kind == FormKind::List {
+            for inner in &child.children {
+                if inner.kind == FormKind::Vector {
+                    return Some(inner);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Return the name Symbol form (the identifier, not the `defn` keyword).
+fn name_child(defn: &Form) -> Option<&Form> {
+    // children: [defn-kw, name, ?docstring, args-or-arities...]
+    // Skip metadata wrappers on the name position.
+    let raw = defn.children.get(1)?;
+    if raw.kind == FormKind::Metadata {
+        // ^meta name — the annotated form is the second child of Meta.
+        raw.children.get(1)
+    } else {
+        Some(raw)
+    }
+}
+
+// ── Legacy byte-scanning fallback ────────────────────────────────────────────
+//
+// Used when the AST parse fails (e.g., invalid source mid-edit).  These are
+// the original string-surgery helpers from the pre-AST implementation.
+
+fn apply_via_scan(source: &str, edit: &Edit) -> Result<String> {
     let src = source.as_bytes();
     match edit {
         Edit::ReplaceBody { fn_name, new_body } => {
             let (defn_start, defn_end) = require_defn(src, fn_name)?;
             let (_, args_end) = require_args_vec(src, defn_start, fn_name)?;
-            // Replace everything between the args vector and the closing ')'.
             Ok(format!(
                 "{}\n  {new_body}\n{}",
                 &source[..args_end],
-                &source[defn_end - 1..], // keep the closing ')'
+                &source[defn_end - 1..],
             ))
         }
 
@@ -86,7 +244,11 @@ fn apply_single(source: &str, edit: &Edit) -> Result<String> {
             ))
         }
 
-        Edit::WrapBody { fn_name, wrapper_prefix, wrapper_suffix } => {
+        Edit::WrapBody {
+            fn_name,
+            wrapper_prefix,
+            wrapper_suffix,
+        } => {
             let (defn_start, defn_end) = require_defn(src, fn_name)?;
             let (_, args_end) = require_args_vec(src, defn_start, fn_name)?;
             let body = source[args_end..defn_end - 1].trim();
@@ -99,7 +261,6 @@ fn apply_single(source: &str, edit: &Edit) -> Result<String> {
 
         Edit::Rename { old_name, new_name } => {
             let (defn_start, _) = require_defn(src, old_name)?;
-            // Advance past '(' and the defn/defn- keyword to find the name.
             let j = skip_ws(src, defn_start + 1);
             let kw_len = keyword_len(src, j);
             let name_start = skip_ws(src, j + kw_len);
@@ -111,11 +272,12 @@ fn apply_single(source: &str, edit: &Edit) -> Result<String> {
             ))
         }
 
-        Edit::InsertAfter { anchor: None, form } => {
-            Ok(format!("{}\n\n{form}", source.trim_end()))
-        }
+        Edit::InsertAfter { anchor: None, form } => Ok(format!("{}\n\n{form}", source.trim_end())),
 
-        Edit::InsertAfter { anchor: Some(name), form } => {
+        Edit::InsertAfter {
+            anchor: Some(name),
+            form,
+        } => {
             let (_, defn_end) = require_defn(src, name)?;
             Ok(format!(
                 "{}\n\n{form}{}",
@@ -126,20 +288,15 @@ fn apply_single(source: &str, edit: &Edit) -> Result<String> {
     }
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
 fn require_defn(src: &[u8], fn_name: &str) -> Result<(usize, usize)> {
-    find_defn_span(src, fn_name.as_bytes())
-        .ok_or_else(|| EditorError::NotFound(fn_name.to_owned()))
+    find_defn_span(src, fn_name.as_bytes()).ok_or_else(|| EditorError::NotFound(fn_name.to_owned()))
 }
 
 fn require_args_vec(src: &[u8], defn_start: usize, fn_name: &str) -> Result<(usize, usize)> {
-    find_args_vec(src, defn_start).ok_or_else(|| {
-        EditorError::InvalidEdit(format!("no argument vector found in {fn_name}"))
-    })
+    find_args_vec(src, defn_start)
+        .ok_or_else(|| EditorError::InvalidEdit(format!("no argument vector found in {fn_name}")))
 }
 
-/// Length of `defn` or `defn-` keyword at `pos` (0 if neither is present).
 fn keyword_len(src: &[u8], pos: usize) -> usize {
     if src[pos..].starts_with(b"defn-") && is_delim(src, pos + 5) {
         5
@@ -157,16 +314,26 @@ fn skip_ws(src: &[u8], mut i: usize) -> usize {
     i
 }
 
-/// True if `pos` is past the end of `src` or holds a delimiter character.
 fn is_delim(src: &[u8], pos: usize) -> bool {
-    src.get(pos).map_or(true, |&c| {
-        matches!(c, b' ' | b'\t' | b'\n' | b'\r' | b',' |
-                    b'(' | b')' | b'[' | b']' | b'{' | b'}' | b';' | b'"')
+    src.get(pos).is_none_or(|&c| {
+        matches!(
+            c,
+            b' ' | b'\t'
+                | b'\n'
+                | b'\r'
+                | b','
+                | b'('
+                | b')'
+                | b'['
+                | b']'
+                | b'{'
+                | b'}'
+                | b';'
+                | b'"'
+        )
     })
 }
 
-/// Return the byte position just after the closing bracket of the form that
-/// opens at `start`. `src[start]` must be `(`, `[`, or `{`.
 fn form_end(src: &[u8], start: usize) -> Option<usize> {
     let mut depth: i32 = 0;
     let mut in_str = false;
@@ -174,18 +341,24 @@ fn form_end(src: &[u8], start: usize) -> Option<usize> {
     while i < src.len() {
         if in_str {
             match src[i] {
-                b'\\' => i += 1, // skip escaped character
-                b'"'  => in_str = false,
-                _     => {}
+                b'\\' => i += 1,
+                b'"' => in_str = false,
+                _ => {}
             }
         } else {
             match src[i] {
-                b';' => while i < src.len() && src[i] != b'\n' { i += 1 },
-                b'"'              => in_str = true,
+                b';' => {
+                    while i < src.len() && src[i] != b'\n' {
+                        i += 1
+                    }
+                }
+                b'"' => in_str = true,
                 b'(' | b'[' | b'{' => depth += 1,
                 b')' | b']' | b'}' => {
                     depth -= 1;
-                    if depth == 0 { return Some(i + 1); }
+                    if depth == 0 {
+                        return Some(i + 1);
+                    }
                 }
                 _ => {}
             }
@@ -195,12 +368,6 @@ fn form_end(src: &[u8], start: usize) -> Option<usize> {
     None
 }
 
-/// Locate `(defn[-] <name> ...)` in source; returns `(open_byte, end_byte)`.
-///
-/// Skips string literals and line comments so a `defn` inside a string or
-/// comment does not match. Does not distinguish nesting depth, so a nested
-/// `defn` inside a `let` would match — acceptable for the agent's typical
-/// top-level usage.
 fn find_defn_span(src: &[u8], name: &[u8]) -> Option<(usize, usize)> {
     let mut i = 0;
     let mut in_str = false;
@@ -208,15 +375,24 @@ fn find_defn_span(src: &[u8], name: &[u8]) -> Option<(usize, usize)> {
         if in_str {
             match src[i] {
                 b'\\' => i += 1,
-                b'"'  => in_str = false,
-                _     => {}
+                b'"' => in_str = false,
+                _ => {}
             }
             i += 1;
             continue;
         }
         match src[i] {
-            b'"' => { in_str = true; i += 1; continue; }
-            b';' => { while i < src.len() && src[i] != b'\n' { i += 1; } continue; }
+            b'"' => {
+                in_str = true;
+                i += 1;
+                continue;
+            }
+            b';' => {
+                while i < src.len() && src[i] != b'\n' {
+                    i += 1;
+                }
+                continue;
+            }
             b'(' => {
                 let j = skip_ws(src, i + 1);
                 let kw = keyword_len(src, j);
@@ -236,25 +412,27 @@ fn find_defn_span(src: &[u8], name: &[u8]) -> Option<(usize, usize)> {
     None
 }
 
-/// Find the `[args]` vector that is a direct child of the defn at `defn_start`.
-/// Returns `(open_byte, end_byte)` of the vector.
 fn find_args_vec(src: &[u8], defn_start: usize) -> Option<(usize, usize)> {
-    let mut depth: i32 = 1; // already inside the `(defn ...)` form
+    let mut depth: i32 = 1;
     let mut in_str = false;
     let mut i = defn_start + 1;
     while i < src.len() {
         if in_str {
             match src[i] {
                 b'\\' => i += 1,
-                b'"'  => in_str = false,
-                _     => {}
+                b'"' => in_str = false,
+                _ => {}
             }
             i += 1;
             continue;
         }
         match src[i] {
-            b';' => { while i < src.len() && src[i] != b'\n' { i += 1; } }
-            b'"'  => in_str = true,
+            b';' => {
+                while i < src.len() && src[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'"' => in_str = true,
             b'(' | b'{' => depth += 1,
             b'[' if depth == 1 => {
                 let end = form_end(src, i)?;
@@ -263,7 +441,9 @@ fn find_args_vec(src: &[u8], defn_start: usize) -> Option<(usize, usize)> {
             b'[' => depth += 1,
             b')' | b']' | b'}' => {
                 depth -= 1;
-                if depth == 0 { return None; }
+                if depth == 0 {
+                    return None;
+                }
             }
             _ => {}
         }
@@ -307,7 +487,6 @@ mod tests {
             },
         );
         assert!(result.contains("(println \"calling greet\")"), "{result}");
-        // Original body still present
         assert!(result.contains("(str \"Hello, \" name"), "{result}");
     }
 
@@ -329,7 +508,10 @@ mod tests {
     fn rename() {
         let result = apply(
             GREET,
-            Edit::Rename { old_name: "greet".into(), new_name: "welcome".into() },
+            Edit::Rename {
+                old_name: "greet".into(),
+                new_name: "welcome".into(),
+            },
         );
         assert!(result.contains("defn welcome"), "{result}");
         assert!(!result.contains("defn greet"), "{result}");
@@ -339,7 +521,10 @@ mod tests {
     fn insert_after_anchor_none() {
         let result = apply(
             GREET,
-            Edit::InsertAfter { anchor: None, form: "(defn bye [name] \"Bye!\")".into() },
+            Edit::InsertAfter {
+                anchor: None,
+                form: "(defn bye [name] \"Bye!\")".into(),
+            },
         );
         assert!(result.contains("defn greet"), "{result}");
         assert!(result.contains("defn bye"), "{result}");
@@ -365,7 +550,10 @@ mod tests {
     #[test]
     fn not_found_returns_error() {
         let err = Editor::new(GREET)
-            .apply(&[Edit::ReplaceBody { fn_name: "nope".into(), new_body: "x".into() }])
+            .apply(&[Edit::ReplaceBody {
+                fn_name: "nope".into(),
+                new_body: "x".into(),
+            }])
             .unwrap_err();
         assert!(matches!(err, EditorError::NotFound(_)));
     }
@@ -375,9 +563,27 @@ mod tests {
         let src = "(def docs \"(defn fake [x] x)\")\n(defn real [x] x)";
         let result = apply(
             src,
-            Edit::Rename { old_name: "real".into(), new_name: "actual".into() },
+            Edit::Rename {
+                old_name: "real".into(),
+                new_name: "actual".into(),
+            },
         );
         assert!(result.contains("defn actual"), "{result}");
-        assert!(result.contains("(defn fake [x] x)"), "{result}"); // string unchanged
+        assert!(result.contains("(defn fake [x] x)"), "{result}");
+    }
+
+    #[test]
+    fn multiarity_replace_body() {
+        let src = "(defn add\n  ([x] x)\n  ([x y] (+ x y)))";
+        let result = apply(
+            src,
+            Edit::ReplaceBody {
+                fn_name: "add".into(),
+                new_body: "nil".into(),
+            },
+        );
+        // The new body replaces everything between the first args vec and defn end.
+        assert!(result.contains("nil"), "{result}");
+        assert!(result.contains("defn add"), "{result}");
     }
 }

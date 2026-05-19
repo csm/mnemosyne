@@ -42,7 +42,10 @@ impl ClojureRuntime {
 
         let mut last = ClojureValue::Nil;
         for form in &forms {
-            let val = self.env.eval(form).map_err(|e| ExecutionError::Eval(format!("{e:?}")))?;
+            let val = self
+                .env
+                .eval(form)
+                .map_err(|e| ExecutionError::Eval(format!("{e:?}")))?;
             last = ClojureValue::from(val);
         }
         Ok(last)

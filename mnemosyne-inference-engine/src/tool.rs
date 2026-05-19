@@ -51,7 +51,8 @@ pub fn builtin_tools() -> Vec<Tool> {
             description: "Search indexed repositories for functions matching a query. \
                 Combines full-text (keyword) and semantic (intent-based) search when \
                 the semantic index is loaded; falls back to full-text only otherwise. \
-                Results include a source field: \"fulltext\", \"semantic\", or \"both\".".into(),
+                Results include a source field: \"fulltext\", \"semantic\", or \"both\"."
+                .into(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -74,7 +75,8 @@ pub fn builtin_tools() -> Vec<Tool> {
         },
         Tool {
             name: "edit_function".into(),
-            description: "Apply a structural edit to a Clojure function in a repository file.".into(),
+            description: "Apply a structural edit to a Clojure function in a repository file."
+                .into(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
