@@ -80,12 +80,12 @@ impl SymbolRegistry {
         let repo = self.open_repo(vref)?;
         let commit_hash = repo.resolve_commit_hash(&vref.commit)?;
 
-        let (fingerprint, sig_valid) = repo
-            .commit_signature_status(&commit_hash)
-            .unwrap_or_else(|e| {
-                tracing::warn!("signature check failed for {vref}: {e}");
-                (None, false)
-            });
+        let (fingerprint, sig_valid) =
+            repo.commit_signature_status(&commit_hash)
+                .unwrap_or_else(|e| {
+                    tracing::warn!("signature check failed for {vref}: {e}");
+                    (None, false)
+                });
 
         let repo_key = vref.repo_url.as_deref().unwrap_or("local");
         let trust = self.trust_policy.resolve(repo_key, fingerprint.as_deref());
@@ -136,10 +136,7 @@ impl SymbolRegistry {
                 .ok_or_else(|| {
                     RegistryError::RepoNotFound(
                         vref.namespace.clone(),
-                        format!(
-                            "no repo registered for '{}'; call register_repo()",
-                            ns_root
-                        ),
+                        format!("no repo registered for '{}'; call register_repo()", ns_root),
                     )
                 })?
         };
@@ -189,7 +186,11 @@ impl SymbolRegistry {
             .find(|f| {
                 f.path
                     .to_str()
-                    .map(|p| p == ns_path || p == format!("src/{ns_path}") || p.ends_with(&format!("/{ns_path}")))
+                    .map(|p| {
+                        p == ns_path
+                            || p == format!("src/{ns_path}")
+                            || p.ends_with(&format!("/{ns_path}"))
+                    })
                     .unwrap_or(false)
             })
             .ok_or_else(|| {

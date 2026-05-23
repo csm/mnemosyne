@@ -37,7 +37,9 @@ impl VersionedRef {
         };
 
         // Split at the last `@` to get commit hash
-        let at = remainder.rfind('@').ok_or_else(|| bad("missing '@<commit>'"))?;
+        let at = remainder
+            .rfind('@')
+            .ok_or_else(|| bad("missing '@<commit>'"))?;
         let sym_part = &remainder[..at];
         let commit = remainder[at + 1..].to_owned();
 
@@ -61,7 +63,12 @@ impl VersionedRef {
             return Err(bad("namespace is empty"));
         }
 
-        Ok(Self { repo_url, namespace, symbol, commit })
+        Ok(Self {
+            repo_url,
+            namespace,
+            symbol,
+            commit,
+        })
     }
 
     /// Canonical string representation (round-trips through `parse`).
@@ -110,8 +117,7 @@ mod tests {
 
     #[test]
     fn parse_external_ref() {
-        let vref =
-            VersionedRef::parse("https://github.com/u/r::app.util/parse@cafe1234").unwrap();
+        let vref = VersionedRef::parse("https://github.com/u/r::app.util/parse@cafe1234").unwrap();
         assert_eq!(vref.repo_url, Some("https://github.com/u/r".into()));
         assert_eq!(vref.namespace, "app.util");
         assert_eq!(vref.symbol, Some("parse".into()));

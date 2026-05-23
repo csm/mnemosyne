@@ -27,14 +27,22 @@ impl ClojureRuntime {
     pub fn new() -> Self {
         let globals = standard_env();
         let env = Env::new(Arc::clone(&globals), "user");
-        Self { globals, env, loaded_versions: HashMap::new() }
+        Self {
+            globals,
+            env,
+            loaded_versions: HashMap::new(),
+        }
     }
 
     /// Boot with only the minimal bootstrap environment (no clojure.test, etc.).
     pub fn minimal() -> Self {
         let globals = cljrs_eval::standard_env_minimal();
         let env = Env::new(Arc::clone(&globals), "user");
-        Self { globals, env, loaded_versions: HashMap::new() }
+        Self {
+            globals,
+            env,
+            loaded_versions: HashMap::new(),
+        }
     }
 
     /// Parse and evaluate all forms in `source`, returning the value of the last form.
@@ -80,7 +88,8 @@ impl ClojureRuntime {
     /// vref for a symbol load, or just the namespace for a namespace load.
     pub fn load_versioned(&mut self, source: &str, vref_str: &str) -> Result<()> {
         self.load_string(source)?;
-        self.loaded_versions.insert(vref_str.to_owned(), vref_str.to_owned());
+        self.loaded_versions
+            .insert(vref_str.to_owned(), vref_str.to_owned());
         tracing::debug!(vref = vref_str, "loaded versioned symbol");
         Ok(())
     }

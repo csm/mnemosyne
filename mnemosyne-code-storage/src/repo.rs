@@ -194,8 +194,8 @@ impl CodeRepository {
     /// Shells out to `git verify-commit --raw` for actual cryptographic
     /// verification so the system GPG/SSH key ring is consulted.
     pub fn commit_signature_status(&self, hash: &str) -> Result<(Option<String>, bool)> {
-        let oid = git2::Oid::from_str(hash)
-            .map_err(|_| StorageError::InvalidRef(hash.to_owned()))?;
+        let oid =
+            git2::Oid::from_str(hash).map_err(|_| StorageError::InvalidRef(hash.to_owned()))?;
 
         // Fast check: does the commit even have a signature header?
         let has_sig = self
