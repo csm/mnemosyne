@@ -6,6 +6,7 @@ members = [
     "mnemosyne-execution-engine",
     "mnemosyne-core-functions",
     "mnemosyne-code-editor",
+    "mnemosyne-symbol-registry",
     "mnemosyne-inference-engine",
     "mnemosyne-memory",
 ]
@@ -41,4 +42,5 @@ mnemosyne-execution-engine = { path = "mnemosyne-execution-engine" }
 mnemosyne-core-functions  = { path = "mnemosyne-core-functions" }
 mnemosyne-code-editor     = { path = "mnemosyne-code-editor" }
 mnemosyne-inference-engine = { path = "mnemosyne-inference-engine" }
+mnemosyne-symbol-registry  = { path = "mnemosyne-symbol-registry" }
 mnemosyne-memory           = { path = "mnemosyne-memory" }

@@ -163,6 +163,94 @@ impl CodeRepository {
         Ok(oid)
     }
 
+    // ── Version / signature helpers ───────────────────────────────────────────
+
+    /// Resolve any git ref (branch, tag, short or full SHA) to its canonical
+    /// 40-character commit SHA.
+    pub fn resolve_commit_hash(&self, rev: &str) -> Result<String> {
+        let obj = self
+            .inner
+            .revparse_single(rev)
+            .map_err(|_| StorageError::InvalidRef(rev.to_owned()))?;
+        let commit = obj
+            .peel_to_commit()
+            .map_err(|_| StorageError::InvalidRef(rev.to_owned()))?;
+        Ok(commit.id().to_string())
+    }
+
+    /// Read the raw bytes of a single file at the given commit hash.
+    pub fn read_file_at_commit(&self, hash: &str, rel_path: &str) -> Result<Vec<u8>> {
+        let files = self.files_at_rev(hash)?;
+        files
+            .into_iter()
+            .find(|f| f.path.to_str().map(|p| p == rel_path).unwrap_or(false))
+            .map(|f| f.content)
+            .ok_or_else(|| StorageError::NotFound(rel_path.to_owned()))
+    }
+
+    /// Return `(fingerprint, is_valid)` for the GPG/SSH signature on `hash`.
+    ///
+    /// Returns `(None, false)` when the commit carries no signature.
+    /// Shells out to `git verify-commit --raw` for actual cryptographic
+    /// verification so the system GPG/SSH key ring is consulted.
+    pub fn commit_signature_status(&self, hash: &str) -> Result<(Option<String>, bool)> {
+        let oid = git2::Oid::from_str(hash)
+            .map_err(|_| StorageError::InvalidRef(hash.to_owned()))?;
+
+        // Fast check: does the commit even have a signature header?
+        let has_sig = self
+            .inner
+            .extract_signature(&oid, Some("gpgsig"))
+            .or_else(|_| self.inner.extract_signature(&oid, Some("gpgsig-sha256")))
+            .is_ok();
+        if !has_sig {
+            return Ok((None, false));
+        }
+
+        let workdir = self.inner.workdir().ok_or(StorageError::NoWorkdir)?;
+
+        let output = std::process::Command::new("git")
+            .args(["verify-commit", "--raw", hash])
+            .current_dir(workdir)
+            .output()?;
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let mut fingerprint: Option<String> = None;
+        let mut good_sig = false;
+
+        for line in stderr.lines() {
+            if !line.starts_with("[GNUPG:]") {
+                continue;
+            }
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() < 3 {
+                continue;
+            }
+            match parts[1] {
+                "VALIDSIG" => fingerprint = Some(parts[2].to_owned()),
+                "GOODSIG" => good_sig = true,
+                "BADSIG" => good_sig = false,
+                _ => {}
+            }
+        }
+
+        Ok((fingerprint, good_sig))
+    }
+
+    /// Fetch updates from `url` into this repository's object database.
+    ///
+    /// Used to ensure a cloned external repo has the latest objects before
+    /// resolving a versioned reference. Failures are non-fatal; the caller
+    /// should log a warning and proceed with whatever is already cached.
+    pub fn fetch_remote(&self, url: &str) -> Result<()> {
+        let mut remote = self
+            .inner
+            .find_remote("origin")
+            .or_else(|_| self.inner.remote_anonymous(url))?;
+        remote.fetch(&[] as &[&str], None, None)?;
+        Ok(())
+    }
+
     /// Write a file and commit it in a single call.
     pub fn write_and_commit(
         &self,

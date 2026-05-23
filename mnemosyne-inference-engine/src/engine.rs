@@ -12,6 +12,7 @@ use mnemosyne_code_storage::CodeRepository;
 use mnemosyne_execution_engine::ClojureRuntime;
 use mnemosyne_memory::{EpisodeKind, MemoryStore};
 use mnemosyne_semantic_search::{SemanticIndex, SemanticResult};
+use mnemosyne_symbol_registry::{SymbolRegistry, TrustPolicy};
 
 use crate::{
     llm::{LlmBackend, LlmRequest, Message, Role},
@@ -28,6 +29,9 @@ pub struct InferenceEngine {
     /// the LLM uses in tool calls; value is the working-directory path.
     repos: HashMap<String, PathBuf>,
     memory: Option<Arc<Mutex<MemoryStore>>>,
+    /// Symbol registry used by `load_versioned_symbol`. When `None` the tool
+    /// returns an error explaining how to configure one.
+    registry: Option<Arc<Mutex<SymbolRegistry>>>,
     pub default_model: String,
     pub system_prompt: String,
 }
@@ -41,6 +45,7 @@ impl InferenceEngine {
             semantic: None,
             repos: HashMap::new(),
             memory: None,
+            registry: None,
             default_model: "claude-opus-4-7".into(),
             system_prompt: DEFAULT_SYSTEM_PROMPT.into(),
         }
@@ -65,6 +70,26 @@ impl InferenceEngine {
     pub fn with_memory(mut self, store: MemoryStore) -> Self {
         self.memory = Some(Arc::new(Mutex::new(store)));
         self
+    }
+
+    /// Attach a symbol registry. Required for the `load_versioned_symbol` tool.
+    ///
+    /// Pass a registry pre-configured with the appropriate [`TrustPolicy`] and
+    /// any local repo aliases. External repositories are cloned on demand into
+    /// the registry's cache directory.
+    pub fn with_registry(mut self, registry: SymbolRegistry) -> Self {
+        self.registry = Some(Arc::new(Mutex::new(registry)));
+        self
+    }
+
+    /// Convenience builder that creates a [`SymbolRegistry`] with `policy` and
+    /// no pre-registered repos, using `cache_dir` for external repo clones.
+    pub fn with_trust_policy(
+        self,
+        cache_dir: impl Into<std::path::PathBuf>,
+        policy: TrustPolicy,
+    ) -> Self {
+        self.with_registry(SymbolRegistry::new(cache_dir, policy))
     }
 
     /// Run a single-turn prompt, dispatching any tool calls before returning
@@ -259,6 +284,40 @@ impl InferenceEngine {
                 }
             }
 
+            "load_versioned_symbol" => {
+                let vref_str = call.input["vref"].as_str().unwrap_or("").to_owned();
+                match &self.registry {
+                    None => ToolResult::err(
+                        &call.id,
+                        "no symbol registry configured; call with_registry() on InferenceEngine",
+                    ),
+                    Some(reg) => {
+                        let resolved = {
+                            let mut reg = reg.lock().await;
+                            match reg.resolve(&vref_str) {
+                                Ok(r) => r,
+                                Err(e) => return ToolResult::err(&call.id, e.to_string()),
+                            }
+                        };
+                        let trust = format!("{:?}", resolved.trust);
+                        let mut rt = self.runtime.lock().await;
+                        match rt.load_versioned(&resolved.source, &vref_str) {
+                            Ok(()) => ToolResult::ok(
+                                &call.id,
+                                serde_json::json!({
+                                    "vref": vref_str,
+                                    "commit": resolved.commit_hash,
+                                    "signed": resolved.signature_valid,
+                                    "fingerprint": resolved.signature_fingerprint,
+                                    "trust": trust,
+                                }),
+                            ),
+                            Err(e) => ToolResult::err(&call.id, e.to_string()),
+                        }
+                    }
+                }
+            }
+
             other => ToolResult::err(&call.id, format!("unknown tool: {other}")),
         }
     }
@@ -337,7 +396,39 @@ fn result_key(f: &IndexedFunction) -> String {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const DEFAULT_SYSTEM_PROMPT: &str = "\
-You are Mnemosyne, an AI programming assistant with access to tools for \
-searching code repositories, evaluating Clojure expressions, and editing \
-Clojure functions. Use these tools to answer questions and complete tasks. \
+You are Mnemosyne, an AI programming assistant operating in a Clojurust \
+environment that supports versioned symbols.
+
+## Versioned symbols — the golden rule
+
+Every symbol you reference, define, or load MUST be pinned to a specific \
+git commit using the versioned-ref syntax:
+
+  namespace/symbol@<commit-hash>          — single function
+  namespace@<commit-hash>                 — whole namespace
+  https://github.com/u/r::ns/sym@<hash>  — external repository
+
+Never use bare, unpinned namespace or symbol references in production code. \
+Pinning guarantees reproducibility: the exact same bytes are loaded on every \
+run, regardless of upstream changes. Different versions of the same function \
+can coexist in the same runtime — each is a distinct, immutable value.
+
+## Workflow
+
+1. Use `search_code` to find relevant functions.
+2. Use `load_versioned_symbol` to load a pinned version into the runtime \
+   before calling it — the registry resolves the git ref, verifies the \
+   commit signature, and applies the trust policy.
+3. Use `eval_clojure` to run expressions in the live runtime.
+4. Use `edit_function` to make structural changes; the resulting commit hash \
+   becomes the new pin for downstream consumers.
+5. Use `recall_memory` to recover context from earlier sessions.
+
+## Trust and signatures
+
+External code (including code produced by other agents) is only executed \
+after its commit signature is verified and the trust policy is satisfied. \
+`load_versioned_symbol` returns the fingerprint and trust level for every \
+symbol it loads — always check these when the source is external.
+
 Prefer precise, minimal edits over large rewrites.";

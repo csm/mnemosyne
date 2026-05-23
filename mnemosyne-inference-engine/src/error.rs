@@ -14,6 +14,8 @@ pub enum InferenceError {
     Editor(#[from] mnemosyne_code_editor::EditorError),
     #[error("storage error: {0}")]
     Storage(#[from] mnemosyne_code_storage::StorageError),
+    #[error("symbol registry error: {0}")]
+    Registry(#[from] mnemosyne_symbol_registry::RegistryError),
     #[error("llm error: {status} — {message}")]
     Llm { status: u16, message: String },
     #[error("unknown tool: {0}")]
