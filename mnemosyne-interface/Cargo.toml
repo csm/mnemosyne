@@ -1,0 +1,29 @@
+[package]
+name = "mnemosyne-interface"
+description = "HTTP/SSE interface adapter and CLI harness for Mnemosyne"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "mnemosyne"
+path = "src/main.rs"
+
+[dependencies]
+mnemosyne-inference-engine.workspace = true
+mnemosyne-code-search.workspace = true
+mnemosyne-execution-engine.workspace = true
+mnemosyne-memory.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+async-trait = "0.1"
+axum = "0.7"
+tower-http = { version = "0.5", features = ["cors"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+clap = { version = "4", features = ["derive", "env"] }
+async-stream = "0.3"
+futures = "0.3"

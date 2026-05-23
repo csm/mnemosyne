@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mnemosyne</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: #1a1b1e;
+  color: #e0e0e0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+header {
+  padding: 12px 20px;
+  background: #25262b;
+  border-bottom: 1px solid #373a40;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+header h1 {
+  font-size: 17px;
+  font-weight: 600;
+  color: #c9d1d9;
+  letter-spacing: 0.02em;
+}
+
+.session-badge {
+  font-size: 11px;
+  color: #6e7681;
+  font-family: 'Fira Code', 'Cascadia Code', monospace;
+  background: #1a1b1e;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid #373a40;
+}
+
+#chat {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+#chat:empty::before {
+  content: 'Ask Mnemosyne to search, evaluate, or edit Clojure code.';
+  color: #555;
+  font-size: 14px;
+  align-self: center;
+  margin-top: auto;
+  margin-bottom: auto;
+}
+
+.message {
+  max-width: 78%;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.user-msg {
+  align-self: flex-end;
+  background: #1971c2;
+  color: #fff;
+  border-radius: 8px 8px 2px 8px;
+}
+
+.assistant-msg {
+  align-self: flex-start;
+  background: #25262b;
+  color: #e0e0e0;
+  border: 1px solid #373a40;
+  border-radius: 8px 8px 8px 2px;
+}
+
+.assistant-msg.pending::after {
+  content: '▍';
+  animation: blink 1s step-start infinite;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+.assistant-msg pre {
+  background: #141517;
+  padding: 10px 12px;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 8px 0 4px;
+  font-size: 12.5px;
+  border: 1px solid #2c2e33;
+}
+
+.assistant-msg pre code {
+  background: none;
+  padding: 0;
+  font-size: inherit;
+}
+
+.assistant-msg code {
+  background: #141517;
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-family: 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 12.5px;
+  border: 1px solid #2c2e33;
+}
+
+.error-msg {
+  align-self: center;
+  color: #ff8080;
+  font-size: 13px;
+  padding: 6px 14px;
+  background: #2c1a1a;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 80, 80, 0.3);
+}
+
+#input-area {
+  padding: 14px 20px;
+  background: #25262b;
+  border-top: 1px solid #373a40;
+  flex-shrink: 0;
+}
+
+#input-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+#input {
+  flex: 1;
+  background: #1a1b1e;
+  border: 1px solid #373a40;
+  border-radius: 6px;
+  color: #e0e0e0;
+  padding: 10px 14px;
+  font-size: 14px;
+  font-family: inherit;
+  resize: none;
+  min-height: 44px;
+  max-height: 180px;
+  line-height: 1.5;
+  transition: border-color 0.15s;
+}
+
+#input:focus {
+  outline: none;
+  border-color: #1971c2;
+}
+
+#input::placeholder { color: #555; }
+
+#send-btn {
+  background: #1971c2;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0 20px;
+  cursor: pointer;
+  font-size: 14px;
+  font-family: inherit;
+  height: 44px;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+#send-btn:hover:not(:disabled) { background: #1c7ed6; }
+#send-btn:disabled { background: #2c2e33; color: #555; cursor: not-allowed; }
+
+#hint {
+  font-size: 11px;
+  color: #555;
+  margin-top: 6px;
+  text-align: right;
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Mnemosyne</h1>
+  <span class="session-badge" id="session-badge"></span>
+</header>
+<div id="chat"></div>
+<div id="input-area">
+  <div id="input-row">
+    <textarea id="input" placeholder="Ask Mnemosyne…" rows="1"></textarea>
+    <button id="send-btn">Send</button>
+  </div>
+  <div id="hint">Enter to send · Shift+Enter for newline</div>
+</div>
+<script>
+const chat     = document.getElementById('chat');
+const input    = document.getElementById('input');
+const sendBtn  = document.getElementById('send-btn');
+const badge    = document.getElementById('session-badge');
+
+const sessionId = crypto.randomUUID();
+badge.textContent = sessionId.slice(0, 8);
+
+function esc(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function renderMarkdown(text) {
+  // Fenced code blocks
+  text = text.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) =>
+    `<pre><code class="language-${esc(lang)}">${esc(code.trimEnd())}</code></pre>`);
+  // Inline code
+  text = text.replace(/`([^`\n]+)`/g, (_, c) => `<code>${esc(c)}</code>`);
+  // Bold
+  text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  // Newlines to <br> (but not inside pre blocks)
+  text = text.replace(/\n(?!<\/code>)/g, '<br>');
+  return text;
+}
+
+function appendMessage(role, html, cssExtra) {
+  const div = document.createElement('div');
+  div.className = 'message ' + (role === 'user' ? 'user-msg' : 'assistant-msg') + (cssExtra ? ' ' + cssExtra : '');
+  if (role === 'user') {
+    div.textContent = html; // plain text for user
+  } else {
+    div.innerHTML = html;
+  }
+  chat.appendChild(div);
+  scrollToBottom();
+  return div;
+}
+
+function scrollToBottom() {
+  chat.scrollTop = chat.scrollHeight;
+}
+
+async function sendMessage() {
+  const text = input.value.trim();
+  if (!text || sendBtn.disabled) return;
+
+  input.value = '';
+  autoResize();
+  sendBtn.disabled = true;
+
+  appendMessage('user', text);
+  const assistantDiv = appendMessage('assistant', '', 'pending');
+
+  let accumulated = '';
+
+  try {
+    const resp = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text, session_id: sessionId }),
+    });
+
+    if (!resp.ok) {
+      const msg = await resp.text().catch(() => resp.statusText);
+      assistantDiv.className = 'message error-msg';
+      assistantDiv.textContent = 'Server error: ' + msg;
+      return;
+    }
+
+    const reader = resp.body.getReader();
+    const dec    = new TextDecoder();
+    let buf = '';
+
+    outer: while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+
+      const lines = buf.split('\n');
+      buf = lines.pop(); // keep incomplete line
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const raw = line.slice(6).trim();
+        if (!raw) continue;
+        try {
+          const ev = JSON.parse(raw);
+          if (ev.text !== undefined) {
+            accumulated += ev.text;
+            assistantDiv.classList.remove('pending');
+            assistantDiv.innerHTML = renderMarkdown(accumulated);
+            scrollToBottom();
+          }
+          if (ev.error) {
+            assistantDiv.className = 'message error-msg';
+            assistantDiv.textContent = 'Error: ' + ev.error;
+            break outer;
+          }
+        } catch (_) { /* ignore parse errors on individual SSE frames */ }
+      }
+    }
+
+    assistantDiv.classList.remove('pending');
+    if (!accumulated && !assistantDiv.classList.contains('error-msg')) {
+      assistantDiv.textContent = '(no response)';
+    }
+
+  } catch (err) {
+    assistantDiv.className = 'message error-msg';
+    assistantDiv.textContent = 'Network error: ' + err.message;
+  } finally {
+    sendBtn.disabled = false;
+    input.focus();
+  }
+}
+
+function autoResize() {
+  input.style.height = '';
+  input.style.height = Math.min(input.scrollHeight, 180) + 'px';
+}
+
+sendBtn.addEventListener('click', sendMessage);
+
+input.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+});
+
+input.addEventListener('input', autoResize);
+input.focus();
+</script>
+</body>
+</html>

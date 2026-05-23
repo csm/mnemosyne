@@ -9,6 +9,7 @@ members = [
     "mnemosyne-symbol-registry",
     "mnemosyne-inference-engine",
     "mnemosyne-memory",
+    "mnemosyne-interface",
 ]
 resolver = "2"
 
@@ -44,3 +45,4 @@ mnemosyne-code-editor     = { path = "mnemosyne-code-editor" }
 mnemosyne-inference-engine = { path = "mnemosyne-inference-engine" }
 mnemosyne-symbol-registry  = { path = "mnemosyne-symbol-registry" }
 mnemosyne-memory           = { path = "mnemosyne-memory" }
+mnemosyne-interface        = { path = "mnemosyne-interface" }
