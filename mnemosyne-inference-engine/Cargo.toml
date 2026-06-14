@@ -24,3 +24,7 @@ async-trait = "0.1"
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }
 mockall = "0.13"
+mnemosyne-code-search.workspace = true
+mnemosyne-execution-engine.workspace = true
+async-trait = "0.1"
+serde_json.workspace = true

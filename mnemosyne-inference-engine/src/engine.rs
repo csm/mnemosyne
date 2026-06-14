@@ -15,8 +15,8 @@ use mnemosyne_semantic_search::{SemanticIndex, SemanticResult};
 use mnemosyne_symbol_registry::{SymbolRegistry, TrustPolicy};
 
 use crate::{
-    llm::{LlmBackend, LlmRequest, Message, Role},
-    tool::{ToolCall, ToolResult},
+    llm::{LlmBackend, LlmRequest, Message},
+    tool::{builtin_tools, ToolCall, ToolResult},
     Result,
 };
 
@@ -111,42 +111,33 @@ impl InferenceEngine {
         loop {
             let req = LlmRequest {
                 messages: messages.clone(),
+                tools: builtin_tools(),
                 model: self.default_model.clone(),
                 max_tokens: 4096,
                 temperature: 0.2,
             };
 
             let response = self.llm.complete(req).await?;
-            let content = response.content.clone();
 
-            if !content.trim_start().starts_with('{') {
+            // Record the assistant turn — any text plus the tool_use blocks it
+            // emitted — so the follow-up tool_result blocks line up by id.
+            messages.push(Message::assistant_turn(
+                &response.text,
+                &response.tool_calls,
+            ));
+
+            // No tool calls means the model is done: `text` is the answer.
+            if response.tool_calls.is_empty() {
                 if let Some(mem) = &self.memory {
                     let _ = mem.lock().await.log(EpisodeKind::AssistantReply {
-                        content: content.clone(),
+                        content: response.text.clone(),
                     });
                 }
-                return Ok(content);
+                return Ok(response.text);
             }
 
-            match serde_json::from_str::<Vec<ToolCall>>(&content) {
-                Ok(calls) => {
-                    messages.push(Message::assistant(&content));
-                    let results = self.dispatch_tools(&calls).await;
-                    let result_json = serde_json::to_string(&results)?;
-                    messages.push(Message {
-                        role: Role::User,
-                        content: result_json,
-                    });
-                }
-                Err(_) => {
-                    if let Some(mem) = &self.memory {
-                        let _ = mem.lock().await.log(EpisodeKind::AssistantReply {
-                            content: content.clone(),
-                        });
-                    }
-                    return Ok(content);
-                }
-            }
+            let results = self.dispatch_tools(&response.tool_calls).await;
+            messages.push(Message::tool_results(&results));
         }
     }
 
