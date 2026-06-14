@@ -93,7 +93,8 @@ pub fn builtin_tools() -> Vec<Tool> {
         Tool {
             name: "define_function".into(),
             description: "Persist a brand-new Clojure definition — a function, a zero-arg \
-                fact-returning function like (defn fact-home-dir [] \"/home/user\"), or a \
+                fact-returning function (grouped under a facts.* namespace, e.g. a file \
+                with (ns facts.system-info) then (defn home-dir [] \"/home/user\")), or a \
                 raw EDN def — into a repository file, commit it, and index it so it is \
                 later findable via search_code. Use this to PROMOTE validated scratch work \
                 from the live runtime into the durable code store. To change a definition \

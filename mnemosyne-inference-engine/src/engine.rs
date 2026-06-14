@@ -542,10 +542,13 @@ work with through them.
 Express everything you learn in the same form as everything else — as code or \
 data, never as prose buried in a reply:
 
-- a zero-arg function that returns the fact, e.g. \
-  `(defn fact-home-dir [] \"/home/user\")` (use ordinary hyphenated symbol \
-  names — `:` is not allowed inside a symbol), or
-- a raw EDN structure, e.g. `{:os :linux :cores 8}`.
+- a zero-arg function that returns the fact, grouped under a namespace that \
+  names its subject. Put related facts in one file that begins with \
+  `(ns facts.system-info)` and define each as `(defn home-dir [] \
+  \"/home/user\")`, referenced elsewhere as `facts.system-info/home-dir`. \
+  (Symbol names are hyphenated; `:` is not allowed inside a symbol. Group with \
+  dotted namespaces and refer across them with `/`.)
+- or a raw EDN structure, e.g. `{:os :linux :cores 8}`.
 
 Persistence is tiered. Scratch work — exploratory defs and intermediate \
 values — lives in the live runtime via `eval_clojure`. Once a fact or function \
