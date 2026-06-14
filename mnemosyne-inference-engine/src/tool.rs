@@ -91,6 +91,27 @@ pub fn builtin_tools() -> Vec<Tool> {
             }),
         },
         Tool {
+            name: "define_function".into(),
+            description: "Persist a brand-new Clojure definition — a function, a zero-arg \
+                fact-returning function like (defn fact-home-dir [] \"/home/user\"), or a \
+                raw EDN def — into a repository file, commit it, and index it so it is \
+                later findable via search_code. Use this to PROMOTE validated scratch work \
+                from the live runtime into the durable code store. To change a definition \
+                that already exists, use edit_function instead."
+                .into(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "repo": { "type": "string" },
+                    "file": { "type": "string", "description": "Repo-relative .clj file to append to (created if absent)" },
+                    "source": { "type": "string", "description": "Full Clojure form(s) to add" },
+                    "name": { "type": "string", "description": "Name to index when source is a raw def/EDN with no defn" },
+                    "docstring": { "type": "string", "description": "Optional docstring for the index" }
+                },
+                "required": ["repo", "file", "source"]
+            }),
+        },
+        Tool {
             name: "recall_memory".into(),
             description: "Recall recent episodes (user messages, tool calls, tool results, \
                 assistant replies) from the episodic memory log to recover context from \

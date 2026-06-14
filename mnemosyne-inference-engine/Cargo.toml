@@ -28,3 +28,4 @@ mnemosyne-code-search.workspace = true
 mnemosyne-execution-engine.workspace = true
 async-trait = "0.1"
 serde_json.workspace = true
+git2 = "0.20"

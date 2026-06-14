@@ -6,7 +6,7 @@ use serde::Serialize;
 use tokio::sync::Mutex;
 use tracing::warn;
 
-use mnemosyne_code_editor::{edit_description, Edit, Editor};
+use mnemosyne_code_editor::{edit_description, ClojureAst, Edit, Editor};
 use mnemosyne_code_search::{CodeIndex, IndexedFunction, SearchQuery, SearchResult as FtResult};
 use mnemosyne_code_storage::CodeRepository;
 use mnemosyne_execution_engine::RuntimeHandle;
@@ -259,6 +259,8 @@ impl InferenceEngine {
                 }
             }
 
+            "define_function" => self.define_function(call).await,
+
             "recall_memory" => {
                 let limit = call.input["limit"].as_u64().unwrap_or(10) as usize;
                 match &self.memory {
@@ -313,6 +315,109 @@ impl InferenceEngine {
 
             other => ToolResult::err(&call.id, format!("unknown tool: {other}")),
         }
+    }
+
+    /// Persist a brand-new Clojure definition into a repository and index it.
+    ///
+    /// This is the promotion path from runtime scratch to the durable code
+    /// store: `edit_function` only mutates functions that already exist, so a
+    /// net-new function or fact (a zero-arg fact-returning fn, or a raw EDN
+    /// `def`) needs its own create-and-commit step. The new source is appended
+    /// to `file` (created if absent), committed, and — for every named
+    /// definition we can detect — added to the search index so later sessions
+    /// can `search_code` for it.
+    async fn define_function(&self, call: &ToolCall) -> ToolResult {
+        let repo_name = call.input["repo"].as_str().unwrap_or("").to_owned();
+        let file_path = call.input["file"].as_str().unwrap_or("").to_owned();
+        let source = call.input["source"].as_str().unwrap_or("").to_owned();
+        let explicit_name = call.input["name"].as_str().map(str::to_owned);
+        let docstring = call.input["docstring"].as_str().map(str::to_owned);
+
+        if source.trim().is_empty() {
+            return ToolResult::err(&call.id, "source is empty");
+        }
+
+        let workdir = match self.repos.get(&repo_name) {
+            Some(p) => p.clone(),
+            None => {
+                return ToolResult::err(
+                    &call.id,
+                    format!("unknown repo '{repo_name}'; register it with with_repo()"),
+                )
+            }
+        };
+
+        let repo = match CodeRepository::open(&workdir) {
+            Ok(r) => r,
+            Err(e) => return ToolResult::err(&call.id, e.to_string()),
+        };
+
+        // Append the new form(s) to the file, preserving what is already there.
+        let abs = workdir.join(&file_path);
+        let existing = std::fs::read_to_string(&abs).unwrap_or_default();
+        let new_content = if existing.trim().is_empty() {
+            format!("{}\n", source.trim_end())
+        } else {
+            format!("{}\n\n{}\n", existing.trim_end(), source.trim_end())
+        };
+
+        // Names being defined, for the commit message and the index. Prefer the
+        // `defn` names parsed from the source; fall back to an explicit name for
+        // raw `def`/EDN forms that carry no `defn`.
+        let mut names: Vec<String> = match ClojureAst::parse(&source) {
+            Ok(ast) => ast
+                .top_level
+                .iter()
+                .flat_map(|f| f.find_defns())
+                .filter_map(|f| f.defn_name().map(str::to_owned))
+                .collect(),
+            Err(_) => Vec::new(),
+        };
+        if names.is_empty() {
+            names.extend(explicit_name.clone());
+        }
+
+        let label = if names.is_empty() {
+            file_path.clone()
+        } else {
+            names.join(", ")
+        };
+        let message = format!("Define {label}");
+
+        let oid = match repo.write_and_commit(&file_path, new_content.as_bytes(), &message, None) {
+            Ok(o) => o,
+            Err(e) => return ToolResult::err(&call.id, e.to_string()),
+        };
+
+        // Promote into the search index so the definition is discoverable later.
+        let indexed: Vec<IndexedFunction> = names
+            .iter()
+            .map(|name| IndexedFunction {
+                repo: repo_name.clone(),
+                file_path: file_path.clone(),
+                name: name.clone(),
+                docstring: docstring.clone(),
+                body: source.clone(),
+            })
+            .collect();
+        let index_status = if indexed.is_empty() {
+            "skipped: no named definition detected (pass `name` to index a raw def)".to_owned()
+        } else {
+            match self.index.add_functions(&indexed) {
+                Ok(()) => format!("indexed {} definition(s)", indexed.len()),
+                Err(e) => format!("index error: {e}"),
+            }
+        };
+
+        ToolResult::ok(
+            &call.id,
+            serde_json::json!({
+                "commit": oid.to_string(),
+                "file": file_path,
+                "defined": names,
+                "index": index_status,
+            }),
+        )
     }
 }
 
@@ -438,7 +543,8 @@ Express everything you learn in the same form as everything else — as code or 
 data, never as prose buried in a reply:
 
 - a zero-arg function that returns the fact, e.g. \
-  `(defn fact:home-dir [] \"/home/user\")`, or
+  `(defn fact-home-dir [] \"/home/user\")` (use ordinary hyphenated symbol \
+  names — `:` is not allowed inside a symbol), or
 - a raw EDN structure, e.g. `{:os :linux :cores 8}`.
 
 Persistence is tiered. Scratch work — exploratory defs and intermediate \
