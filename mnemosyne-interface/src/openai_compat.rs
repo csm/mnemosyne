@@ -179,8 +179,7 @@ impl LlmBackend for OpenAiCompatBackend {
                     .map(|c| ToolCall {
                         id: c.id,
                         name: c.function.name,
-                        input: serde_json::from_str(&c.function.arguments)
-                            .unwrap_or(Value::Null),
+                        input: serde_json::from_str(&c.function.arguments).unwrap_or(Value::Null),
                     })
                     .collect();
                 (m.content.unwrap_or_default(), calls)

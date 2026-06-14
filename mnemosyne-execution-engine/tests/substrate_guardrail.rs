@@ -7,8 +7,9 @@ use mnemosyne_execution_engine::{ClojureValue, IoPolicy, RuntimeHandle};
 
 #[tokio::test]
 async fn io_symbols_absent_under_default_policy() {
-    let rt = RuntimeHandle::spawn_minimal(); // deny-all
-    // The async file-IO namespace is not loaded, so the symbol does not resolve.
+    // The async file-IO namespace is not loaded under deny-all, so the symbol
+    // does not resolve.
+    let rt = RuntimeHandle::spawn_minimal();
     let result = rt.eval("clojure.rust.io.async/slurp").await;
     assert!(
         result.is_err(),

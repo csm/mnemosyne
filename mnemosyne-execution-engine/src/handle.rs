@@ -236,8 +236,14 @@ impl RuntimeHandle {
     /// Switch the current namespace (creating it if necessary).
     pub async fn set_namespace(&self, ns: impl Into<String>) -> Result<()> {
         let (reply, rx) = oneshot::channel();
-        self.request(Job::SetNamespace { ns: ns.into(), reply }, rx)
-            .await
+        self.request(
+            Job::SetNamespace {
+                ns: ns.into(),
+                reply,
+            },
+            rx,
+        )
+        .await
     }
 }
 
