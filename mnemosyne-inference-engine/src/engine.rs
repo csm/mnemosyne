@@ -9,7 +9,7 @@ use tracing::warn;
 use mnemosyne_code_editor::{edit_description, Edit, Editor};
 use mnemosyne_code_search::{CodeIndex, IndexedFunction, SearchQuery, SearchResult as FtResult};
 use mnemosyne_code_storage::CodeRepository;
-use mnemosyne_execution_engine::ClojureRuntime;
+use mnemosyne_execution_engine::RuntimeHandle;
 use mnemosyne_memory::{EpisodeKind, MemoryStore};
 use mnemosyne_semantic_search::{SemanticIndex, SemanticResult};
 use mnemosyne_symbol_registry::{SymbolRegistry, TrustPolicy};
@@ -22,7 +22,7 @@ use crate::{
 
 pub struct InferenceEngine {
     llm: Arc<dyn LlmBackend>,
-    runtime: Arc<Mutex<ClojureRuntime>>,
+    runtime: RuntimeHandle,
     index: Arc<CodeIndex>,
     semantic: Option<Arc<Mutex<SemanticIndex>>>,
     /// Named repositories available for `edit_function`. Key is the repo name
@@ -37,10 +37,10 @@ pub struct InferenceEngine {
 }
 
 impl InferenceEngine {
-    pub fn new(llm: Arc<dyn LlmBackend>, runtime: ClojureRuntime, index: CodeIndex) -> Self {
+    pub fn new(llm: Arc<dyn LlmBackend>, runtime: RuntimeHandle, index: CodeIndex) -> Self {
         Self {
             llm,
-            runtime: Arc::new(Mutex::new(runtime)),
+            runtime,
             index: Arc::new(index),
             semantic: None,
             repos: HashMap::new(),
@@ -214,8 +214,7 @@ impl InferenceEngine {
 
             "eval_clojure" => {
                 let source = call.input["source"].as_str().unwrap_or("").to_owned();
-                let mut rt = self.runtime.lock().await;
-                match rt.eval(&source) {
+                match self.runtime.eval(source).await {
                     Ok(val) => ToolResult::ok(&call.id, val.to_string()),
                     Err(e) => ToolResult::err(&call.id, e.to_string()),
                 }
@@ -300,8 +299,11 @@ impl InferenceEngine {
                             }
                         };
                         let trust = format!("{:?}", resolved.trust);
-                        let mut rt = self.runtime.lock().await;
-                        match rt.load_versioned(&resolved.source, &vref_str) {
+                        match self
+                            .runtime
+                            .load_versioned(resolved.source.clone(), vref_str.clone())
+                            .await
+                        {
                             Ok(()) => ToolResult::ok(
                                 &call.id,
                                 serde_json::json!({

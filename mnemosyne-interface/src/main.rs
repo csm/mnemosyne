@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use clap::Parser;
 use mnemosyne_code_search::CodeIndex;
-use mnemosyne_execution_engine::ClojureRuntime;
+use mnemosyne_execution_engine::RuntimeHandle;
 use mnemosyne_inference_engine::{InferenceEngine, LlmBackend};
 use mnemosyne_interface::{run_server, AnthropicBackend, OpenAiCompatBackend, ServerConfig};
 use mnemosyne_memory::MemoryStore;
@@ -85,7 +85,7 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    let runtime = ClojureRuntime::minimal();
+    let runtime = RuntimeHandle::spawn_minimal();
 
     let index_dir = args
         .index_dir
