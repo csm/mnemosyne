@@ -70,6 +70,32 @@ impl ClojureRuntime {
         self.eval(source).map(|_| ())
     }
 
+    /// Like [`eval`](Self::eval) but cooperatively async: `await` and the
+    /// `clojure.core.async` channel operations yield on the LocalSet executor
+    /// instead of blocking the thread. This is the path used when the runtime
+    /// has the async IO/networking substrate installed, so file and network
+    /// calls (which deliver over core.async channels) can actually make
+    /// progress while an expression is being evaluated.
+    ///
+    /// Must be called from within a Tokio `current_thread` + `LocalSet`
+    /// context.
+    pub async fn eval_async(&mut self, source: &str) -> Result<ClojureValue> {
+        let mut parser = Parser::new(source.to_string(), "<repl>".to_string());
+        let forms = parser.parse_all().map_err(|e| ExecutionError::Parse {
+            location: "<repl>".into(),
+            message: format!("{e}"),
+        })?;
+
+        let mut last = ClojureValue::Nil;
+        for form in &forms {
+            let val = cljrs_async::eval_async::eval_async(form, &mut self.env)
+                .await
+                .map_err(|e| ExecutionError::Eval(format!("{e:?}")))?;
+            last = ClojureValue::from(val);
+        }
+        Ok(last)
+    }
+
     /// Switch the current namespace (creates it if it doesn't exist).
     pub fn set_namespace(&mut self, ns: &str) {
         self.env.current_ns = Arc::from(ns);

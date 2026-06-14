@@ -147,7 +147,7 @@ impl RuntimeHandle {
                         let mut rt = build();
                         install_substrate(&rt, &policy);
                         while let Some(job) = rx.recv().await {
-                            handle_job(&mut rt, job);
+                            handle_job_async(&mut rt, job).await;
                         }
                     });
                 } else {
@@ -238,6 +238,18 @@ impl RuntimeHandle {
         let (reply, rx) = oneshot::channel();
         self.request(Job::SetNamespace { ns: ns.into(), reply }, rx)
             .await
+    }
+}
+
+/// Execute a job on the async-executor loop. `Eval` is driven cooperatively via
+/// [`ClojureRuntime::eval_async`] so awaiting IO/network channels yields on the
+/// LocalSet instead of blocking it; every other job is synchronous.
+async fn handle_job_async(rt: &mut ClojureRuntime, job: Job) {
+    match job {
+        Job::Eval { source, reply } => {
+            let _ = reply.send(rt.eval_async(&source).await);
+        }
+        other => handle_job(rt, other),
     }
 }
 
