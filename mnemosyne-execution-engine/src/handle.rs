@@ -18,6 +18,64 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::{ClojureRuntime, ClojureValue, ExecutionError, Result};
 
+/// Guardrail policy for the agent's access to the host environment.
+///
+/// Defaults to denying everything: a runtime spawned with [`IoPolicy::default`]
+/// has no file or network capability and runs purely synchronously (no async
+/// executor). Capabilities are opt-in and additive. Enabling file IO or
+/// networking implies the async substrate, since both deliver their results
+/// over `clojure.core.async` channels.
+///
+/// Shelling out / executing arbitrary programs is intentionally not
+/// representable here — that capability does not exist.
+#[derive(Debug, Clone, Default)]
+pub struct IoPolicy {
+    /// Load `clojure.core.async` (channels, `^:async`, `await`).
+    pub async_enabled: bool,
+    /// Load async file IO (`clojure.rust.io.async`).
+    pub file_io: bool,
+    /// Load networking (`clojure.rust.net.*`).
+    pub network: bool,
+}
+
+impl IoPolicy {
+    /// Deny every host capability (the default).
+    pub fn deny_all() -> Self {
+        Self::default()
+    }
+
+    /// Enable the async substrate together with file IO and networking.
+    pub fn allow_all() -> Self {
+        Self {
+            async_enabled: true,
+            file_io: true,
+            network: true,
+        }
+    }
+
+    /// Whether any capability requires the async (`current_thread` + `LocalSet`)
+    /// executor to be running on the runtime thread.
+    fn needs_async_executor(&self) -> bool {
+        self.async_enabled || self.file_io || self.network
+    }
+}
+
+/// Install the gated async / IO / networking substrate into a runtime's
+/// globals, according to `policy`. Must run on a thread with a Tokio
+/// `current_thread` + `LocalSet` executor active.
+fn install_substrate(rt: &ClojureRuntime, policy: &IoPolicy) {
+    // The async runtime is the prerequisite for the channel-based IO and net
+    // namespaces, so it is installed whenever any capability is enabled.
+    let globals = rt.globals();
+    cljrs_async::init(globals);
+    if policy.file_io {
+        cljrs_io::init(globals);
+    }
+    if policy.network {
+        cljrs_net::init(globals);
+    }
+}
+
 /// A unit of work for the runtime thread. Each variant carries a one-shot
 /// channel on which the result is returned to the caller.
 enum Job {
@@ -51,7 +109,8 @@ pub struct RuntimeHandle {
 }
 
 impl RuntimeHandle {
-    /// Spawn a runtime thread, building the [`ClojureRuntime`] with `build`.
+    /// Spawn a runtime thread with the default (deny-all) [`IoPolicy`], building
+    /// the [`ClojureRuntime`] with `build`.
     ///
     /// The runtime is constructed *on* the thread because it is not `Send` and
     /// therefore cannot be created elsewhere and moved in.
@@ -59,35 +118,44 @@ impl RuntimeHandle {
     where
         F: FnOnce() -> ClojureRuntime + Send + 'static,
     {
+        Self::spawn_with_policy(build, IoPolicy::deny_all())
+    }
+
+    /// Spawn a runtime thread, building it with `build` and granting it the host
+    /// capabilities allowed by `policy`.
+    ///
+    /// When `policy` enables any capability, the thread hosts a Tokio
+    /// `current_thread` + `LocalSet` executor (as required by `cljrs-async`,
+    /// `cljrs-io`, and `cljrs-net`) and the job loop runs asynchronously so the
+    /// channel-backed IO/network tasks can make progress. Otherwise the thread
+    /// runs a plain synchronous loop with no executor.
+    pub fn spawn_with_policy<F>(build: F, policy: IoPolicy) -> Self
+    where
+        F: FnOnce() -> ClojureRuntime + Send + 'static,
+    {
         let (tx, mut rx) = mpsc::unbounded_channel::<Job>();
         thread::Builder::new()
             .name("clojure-runtime".into())
             .spawn(move || {
-                let mut rt = build();
-                // `blocking_recv` parks the thread until a job arrives; it does
-                // not require an active Tokio runtime on this thread.
-                while let Some(job) = rx.blocking_recv() {
-                    match job {
-                        Job::Eval { source, reply } => {
-                            let _ = reply.send(rt.eval(&source));
+                if policy.needs_async_executor() {
+                    let tokio_rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .expect("failed to build current-thread Tokio runtime");
+                    let local = tokio::task::LocalSet::new();
+                    local.block_on(&tokio_rt, async move {
+                        let mut rt = build();
+                        install_substrate(&rt, &policy);
+                        while let Some(job) = rx.recv().await {
+                            handle_job(&mut rt, job);
                         }
-                        Job::LoadVersioned {
-                            source,
-                            vref,
-                            reply,
-                        } => {
-                            let _ = reply.send(rt.load_versioned(&source, &vref));
-                        }
-                        Job::BindingNames { reply } => {
-                            let _ = reply.send(rt.binding_names());
-                        }
-                        Job::CurrentNamespace { reply } => {
-                            let _ = reply.send(rt.current_namespace().to_string());
-                        }
-                        Job::SetNamespace { ns, reply } => {
-                            rt.set_namespace(&ns);
-                            let _ = reply.send(());
-                        }
+                    });
+                } else {
+                    let mut rt = build();
+                    // `blocking_recv` parks the thread until a job arrives; it
+                    // does not require an active Tokio runtime on this thread.
+                    while let Some(job) = rx.blocking_recv() {
+                        handle_job(&mut rt, job);
                     }
                 }
             })
@@ -95,14 +163,24 @@ impl RuntimeHandle {
         Self { tx }
     }
 
-    /// Spawn a runtime with the full standard library loaded.
+    /// Spawn a runtime with the full standard library loaded (deny-all policy).
     pub fn spawn_full() -> Self {
         Self::spawn(ClojureRuntime::new)
     }
 
-    /// Spawn a runtime with only the minimal bootstrap environment.
+    /// Spawn a runtime with only the minimal bootstrap environment (deny-all).
     pub fn spawn_minimal() -> Self {
         Self::spawn(ClojureRuntime::minimal)
+    }
+
+    /// Spawn a full runtime granting the capabilities in `policy`.
+    pub fn spawn_full_with_policy(policy: IoPolicy) -> Self {
+        Self::spawn_with_policy(ClojureRuntime::new, policy)
+    }
+
+    /// Spawn a minimal runtime granting the capabilities in `policy`.
+    pub fn spawn_minimal_with_policy(policy: IoPolicy) -> Self {
+        Self::spawn_with_policy(ClojureRuntime::minimal, policy)
     }
 
     /// Send `job` and await its reply, mapping a dead runtime thread to
@@ -160,5 +238,32 @@ impl RuntimeHandle {
         let (reply, rx) = oneshot::channel();
         self.request(Job::SetNamespace { ns: ns.into(), reply }, rx)
             .await
+    }
+}
+
+/// Execute a single job against the runtime, replying on its one-shot channel.
+/// Shared by both the synchronous and async-executor job loops.
+fn handle_job(rt: &mut ClojureRuntime, job: Job) {
+    match job {
+        Job::Eval { source, reply } => {
+            let _ = reply.send(rt.eval(&source));
+        }
+        Job::LoadVersioned {
+            source,
+            vref,
+            reply,
+        } => {
+            let _ = reply.send(rt.load_versioned(&source, &vref));
+        }
+        Job::BindingNames { reply } => {
+            let _ = reply.send(rt.binding_names());
+        }
+        Job::CurrentNamespace { reply } => {
+            let _ = reply.send(rt.current_namespace().to_string());
+        }
+        Job::SetNamespace { ns, reply } => {
+            rt.set_namespace(&ns);
+            let _ = reply.send(());
+        }
     }
 }
