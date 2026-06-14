@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use clap::Parser;
 use mnemosyne_code_search::CodeIndex;
-use mnemosyne_execution_engine::RuntimeHandle;
+use mnemosyne_execution_engine::{IoPolicy, RuntimeHandle};
 use mnemosyne_inference_engine::{InferenceEngine, LlmBackend};
 use mnemosyne_interface::{run_server, AnthropicBackend, OpenAiCompatBackend, ServerConfig};
 use mnemosyne_memory::MemoryStore;
@@ -53,6 +53,21 @@ struct Args {
     /// Defaults to a `mnemosyne-index` folder inside the system temp dir.
     #[arg(long, env = "MNEMOSYNE_INDEX_DIR")]
     index_dir: Option<PathBuf>,
+
+    /// Allow the agent to perform async file IO (`clojure.rust.io.async`).
+    /// Implies the async substrate. Off by default.
+    #[arg(long, env = "MNEMOSYNE_ALLOW_FILE_IO")]
+    allow_file_io: bool,
+
+    /// Allow the agent to perform networking (`clojure.rust.net.*`).
+    /// Implies the async substrate. Off by default.
+    #[arg(long, env = "MNEMOSYNE_ALLOW_NETWORK")]
+    allow_network: bool,
+
+    /// Load `clojure.core.async` (channels, `^:async`, `await`) without granting
+    /// file or network access. Off by default.
+    #[arg(long, env = "MNEMOSYNE_ALLOW_ASYNC")]
+    allow_async: bool,
 }
 
 #[tokio::main]
@@ -85,7 +100,24 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    let runtime = RuntimeHandle::spawn_minimal();
+    let policy = IoPolicy {
+        async_enabled: args.allow_async,
+        file_io: args.allow_file_io,
+        network: args.allow_network,
+    };
+    if args.allow_async || args.allow_file_io || args.allow_network {
+        tracing::info!(
+            file_io = args.allow_file_io,
+            network = args.allow_network,
+            "environment access enabled"
+        );
+    } else {
+        tracing::info!(
+            "environment access disabled (deny-all); pass --allow-file-io / \
+             --allow-network to grant capabilities"
+        );
+    }
+    let runtime = RuntimeHandle::spawn_minimal_with_policy(policy);
 
     let index_dir = args
         .index_dir
