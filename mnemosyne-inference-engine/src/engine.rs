@@ -6,23 +6,23 @@ use serde::Serialize;
 use tokio::sync::Mutex;
 use tracing::warn;
 
-use mnemosyne_code_editor::{edit_description, Edit, Editor};
+use mnemosyne_code_editor::{edit_description, ClojureAst, Edit, Editor};
 use mnemosyne_code_search::{CodeIndex, IndexedFunction, SearchQuery, SearchResult as FtResult};
 use mnemosyne_code_storage::CodeRepository;
-use mnemosyne_execution_engine::ClojureRuntime;
+use mnemosyne_execution_engine::RuntimeHandle;
 use mnemosyne_memory::{EpisodeKind, MemoryStore};
 use mnemosyne_semantic_search::{SemanticIndex, SemanticResult};
 use mnemosyne_symbol_registry::{SymbolRegistry, TrustPolicy};
 
 use crate::{
-    llm::{LlmBackend, LlmRequest, Message, Role},
-    tool::{ToolCall, ToolResult},
+    llm::{LlmBackend, LlmRequest, Message},
+    tool::{builtin_tools, ToolCall, ToolResult},
     Result,
 };
 
 pub struct InferenceEngine {
     llm: Arc<dyn LlmBackend>,
-    runtime: Arc<Mutex<ClojureRuntime>>,
+    runtime: RuntimeHandle,
     index: Arc<CodeIndex>,
     semantic: Option<Arc<Mutex<SemanticIndex>>>,
     /// Named repositories available for `edit_function`. Key is the repo name
@@ -37,10 +37,10 @@ pub struct InferenceEngine {
 }
 
 impl InferenceEngine {
-    pub fn new(llm: Arc<dyn LlmBackend>, runtime: ClojureRuntime, index: CodeIndex) -> Self {
+    pub fn new(llm: Arc<dyn LlmBackend>, runtime: RuntimeHandle, index: CodeIndex) -> Self {
         Self {
             llm,
-            runtime: Arc::new(Mutex::new(runtime)),
+            runtime,
             index: Arc::new(index),
             semantic: None,
             repos: HashMap::new(),
@@ -111,42 +111,33 @@ impl InferenceEngine {
         loop {
             let req = LlmRequest {
                 messages: messages.clone(),
+                tools: builtin_tools(),
                 model: self.default_model.clone(),
                 max_tokens: 4096,
                 temperature: 0.2,
             };
 
             let response = self.llm.complete(req).await?;
-            let content = response.content.clone();
 
-            if !content.trim_start().starts_with('{') {
+            // Record the assistant turn — any text plus the tool_use blocks it
+            // emitted — so the follow-up tool_result blocks line up by id.
+            messages.push(Message::assistant_turn(
+                &response.text,
+                &response.tool_calls,
+            ));
+
+            // No tool calls means the model is done: `text` is the answer.
+            if response.tool_calls.is_empty() {
                 if let Some(mem) = &self.memory {
                     let _ = mem.lock().await.log(EpisodeKind::AssistantReply {
-                        content: content.clone(),
+                        content: response.text.clone(),
                     });
                 }
-                return Ok(content);
+                return Ok(response.text);
             }
 
-            match serde_json::from_str::<Vec<ToolCall>>(&content) {
-                Ok(calls) => {
-                    messages.push(Message::assistant(&content));
-                    let results = self.dispatch_tools(&calls).await;
-                    let result_json = serde_json::to_string(&results)?;
-                    messages.push(Message {
-                        role: Role::User,
-                        content: result_json,
-                    });
-                }
-                Err(_) => {
-                    if let Some(mem) = &self.memory {
-                        let _ = mem.lock().await.log(EpisodeKind::AssistantReply {
-                            content: content.clone(),
-                        });
-                    }
-                    return Ok(content);
-                }
-            }
+            let results = self.dispatch_tools(&response.tool_calls).await;
+            messages.push(Message::tool_results(&results));
         }
     }
 
@@ -214,8 +205,7 @@ impl InferenceEngine {
 
             "eval_clojure" => {
                 let source = call.input["source"].as_str().unwrap_or("").to_owned();
-                let mut rt = self.runtime.lock().await;
-                match rt.eval(&source) {
+                match self.runtime.eval(source).await {
                     Ok(val) => ToolResult::ok(&call.id, val.to_string()),
                     Err(e) => ToolResult::err(&call.id, e.to_string()),
                 }
@@ -269,6 +259,8 @@ impl InferenceEngine {
                 }
             }
 
+            "define_function" => self.define_function(call).await,
+
             "recall_memory" => {
                 let limit = call.input["limit"].as_u64().unwrap_or(10) as usize;
                 match &self.memory {
@@ -300,8 +292,11 @@ impl InferenceEngine {
                             }
                         };
                         let trust = format!("{:?}", resolved.trust);
-                        let mut rt = self.runtime.lock().await;
-                        match rt.load_versioned(&resolved.source, &vref_str) {
+                        match self
+                            .runtime
+                            .load_versioned(resolved.source.clone(), vref_str.clone())
+                            .await
+                        {
                             Ok(()) => ToolResult::ok(
                                 &call.id,
                                 serde_json::json!({
@@ -320,6 +315,109 @@ impl InferenceEngine {
 
             other => ToolResult::err(&call.id, format!("unknown tool: {other}")),
         }
+    }
+
+    /// Persist a brand-new Clojure definition into a repository and index it.
+    ///
+    /// This is the promotion path from runtime scratch to the durable code
+    /// store: `edit_function` only mutates functions that already exist, so a
+    /// net-new function or fact (a zero-arg fact-returning fn, or a raw EDN
+    /// `def`) needs its own create-and-commit step. The new source is appended
+    /// to `file` (created if absent), committed, and — for every named
+    /// definition we can detect — added to the search index so later sessions
+    /// can `search_code` for it.
+    async fn define_function(&self, call: &ToolCall) -> ToolResult {
+        let repo_name = call.input["repo"].as_str().unwrap_or("").to_owned();
+        let file_path = call.input["file"].as_str().unwrap_or("").to_owned();
+        let source = call.input["source"].as_str().unwrap_or("").to_owned();
+        let explicit_name = call.input["name"].as_str().map(str::to_owned);
+        let docstring = call.input["docstring"].as_str().map(str::to_owned);
+
+        if source.trim().is_empty() {
+            return ToolResult::err(&call.id, "source is empty");
+        }
+
+        let workdir = match self.repos.get(&repo_name) {
+            Some(p) => p.clone(),
+            None => {
+                return ToolResult::err(
+                    &call.id,
+                    format!("unknown repo '{repo_name}'; register it with with_repo()"),
+                )
+            }
+        };
+
+        let repo = match CodeRepository::open(&workdir) {
+            Ok(r) => r,
+            Err(e) => return ToolResult::err(&call.id, e.to_string()),
+        };
+
+        // Append the new form(s) to the file, preserving what is already there.
+        let abs = workdir.join(&file_path);
+        let existing = std::fs::read_to_string(&abs).unwrap_or_default();
+        let new_content = if existing.trim().is_empty() {
+            format!("{}\n", source.trim_end())
+        } else {
+            format!("{}\n\n{}\n", existing.trim_end(), source.trim_end())
+        };
+
+        // Names being defined, for the commit message and the index. Prefer the
+        // `defn` names parsed from the source; fall back to an explicit name for
+        // raw `def`/EDN forms that carry no `defn`.
+        let mut names: Vec<String> = match ClojureAst::parse(&source) {
+            Ok(ast) => ast
+                .top_level
+                .iter()
+                .flat_map(|f| f.find_defns())
+                .filter_map(|f| f.defn_name().map(str::to_owned))
+                .collect(),
+            Err(_) => Vec::new(),
+        };
+        if names.is_empty() {
+            names.extend(explicit_name.clone());
+        }
+
+        let label = if names.is_empty() {
+            file_path.clone()
+        } else {
+            names.join(", ")
+        };
+        let message = format!("Define {label}");
+
+        let oid = match repo.write_and_commit(&file_path, new_content.as_bytes(), &message, None) {
+            Ok(o) => o,
+            Err(e) => return ToolResult::err(&call.id, e.to_string()),
+        };
+
+        // Promote into the search index so the definition is discoverable later.
+        let indexed: Vec<IndexedFunction> = names
+            .iter()
+            .map(|name| IndexedFunction {
+                repo: repo_name.clone(),
+                file_path: file_path.clone(),
+                name: name.clone(),
+                docstring: docstring.clone(),
+                body: source.clone(),
+            })
+            .collect();
+        let index_status = if indexed.is_empty() {
+            "skipped: no named definition detected (pass `name` to index a raw def)".to_owned()
+        } else {
+            match self.index.add_functions(&indexed) {
+                Ok(()) => format!("indexed {} definition(s)", indexed.len()),
+                Err(e) => format!("index error: {e}"),
+            }
+        };
+
+        ToolResult::ok(
+            &call.id,
+            serde_json::json!({
+                "commit": oid.to_string(),
+                "file": file_path,
+                "defined": names,
+                "index": index_status,
+            }),
+        )
     }
 }
 
@@ -396,39 +494,84 @@ fn result_key(f: &IndexedFunction) -> String {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const DEFAULT_SYSTEM_PROMPT: &str = "\
-You are Mnemosyne, an AI programming assistant operating in a Clojurust \
-environment that supports versioned symbols.
+You are Mnemosyne, an agent that accomplishes high-level tasks in the user's \
+computer environment by looking up or writing Clojure functions and running \
+them in a live Clojurust runtime. Clojure is how you get things done; your job \
+is to turn an intent into the right Clojure expression — reusing what already \
+exists wherever you can.
 
-## Versioned symbols — the golden rule
+## Tools vs. Clojure — keep them separate
 
-Every symbol you reference, define, or load MUST be pinned to a specific \
-git commit using the versioned-ref syntax:
+There are exactly two kinds of action, and they are NOT the same thing:
 
-  namespace/symbol@<commit-hash>          — single function
-  namespace@<commit-hash>                 — whole namespace
-  https://github.com/u/r::ns/sym@<hash>  — external repository
+- HARNESS TOOLS are the named tools provided to you through the tool interface \
+  (search_code, eval_clojure, edit_function, recall_memory, \
+  load_versioned_symbol). You invoke them as tool calls. They are NOT Clojure \
+  functions: never write `(eval_clojure ...)` or `(search_code ...)` in \
+  Clojure source, and never expect a tool name to resolve as a symbol.
+- CLOJURE FUNCTIONS are the code you read, write, compose, and run. They live \
+  in the runtime and the code store. You run them by passing Clojure source to \
+  the `eval_clojure` tool — e.g. tool `eval_clojure` with source `(map inc \
+  [1 2 3])`. Clojure's own built-ins (map, reduce, filter, …) are Clojure, not \
+  tools.
 
-Never use bare, unpinned namespace or symbol references in production code. \
-Pinning guarantees reproducibility: the exact same bytes are loaded on every \
-run, regardless of upstream changes. Different versions of the same function \
-can coexist in the same runtime — each is a distinct, immutable value.
+In short: tools are the controls of this harness; Clojure is the material you \
+work with through them.
 
-## Workflow
+## How to work a task
 
-1. Use `search_code` to find relevant functions.
-2. Use `load_versioned_symbol` to load a pinned version into the runtime \
-   before calling it — the registry resolves the git ref, verifies the \
-   commit signature, and applies the trust policy.
-3. Use `eval_clojure` to run expressions in the live runtime.
-4. Use `edit_function` to make structural changes; the resulting commit hash \
-   becomes the new pin for downstream consumers.
-5. Use `recall_memory` to recover context from earlier sessions.
+1. UNDERSTAND the intent and what a successful result looks like in the user's \
+   environment.
+2. SEARCH first with `search_code` — there is almost always existing code to \
+   build on. Read what you find before writing anything.
+3. REUSE, in this order of preference:
+   a. Call an existing function as-is via `eval_clojure`.
+   b. COMPOSE existing functions into a larger one (thread them, map/reduce \
+      over them, wrap them) rather than reimplementing their logic.
+   c. MUTATE an existing function into a new version with `edit_function` \
+      (ReplaceBody, WrapBody, Rename, …). The returned commit hash is the new \
+      version; the old one still exists. Specialise the template functions in \
+      mnemosyne.templates (transform-coll, reduce-to-map, retry, pipeline) and \
+      the helpers in mnemosyne.core when they fit.
+   d. Only write a brand-new function when nothing above fits.
+4. RUN it with `eval_clojure`, inspect the result, and iterate.
+5. ANSWER the user once the task is actually done.
 
-## Trust and signatures
+## Capturing facts
 
-External code (including code produced by other agents) is only executed \
-after its commit signature is verified and the trust policy is satisfied. \
-`load_versioned_symbol` returns the fingerprint and trust level for every \
-symbol it loads — always check these when the source is external.
+Express everything you learn in the same form as everything else — as code or \
+data, never as prose buried in a reply:
+
+- a zero-arg function that returns the fact, grouped under a namespace that \
+  names its subject. Put related facts in one file that begins with \
+  `(ns facts.system-info)` and define each as `(defn home-dir [] \
+  \"/home/user\")`, referenced elsewhere as `facts.system-info/home-dir`. \
+  (Symbol names are hyphenated; `:` is not allowed inside a symbol. Group with \
+  dotted namespaces and refer across them with `/`.)
+- or a raw EDN structure, e.g. `{:os :linux :cores 8}`.
+
+Persistence is tiered. Scratch work — exploratory defs and intermediate \
+values — lives in the live runtime via `eval_clojure`. Once a fact or function \
+is validated and worth keeping, PROMOTE it into the committed code store with \
+`edit_function` so later sessions can `search_code` and reuse it.
+
+## Acting on the environment
+
+You reach the user's computer through Clojure functions backed by the async \
+IO and networking substrate (clojure.core.async channels over cljrs-io / \
+cljrs-net), always within the configured guardrails. Prefer the smallest \
+capability that does the job, and expect IO/network calls to be asynchronous. \
+You may NOT shell out or exec arbitrary programs — that path is disabled.
+
+## Versioned symbols and trust
+
+When you reference code by version, pin it to a commit with the versioned-ref \
+syntax — `namespace/symbol@<commit>`, `namespace@<commit>`, or \
+`https://host/u/r::ns/sym@<commit>` for an external repo — and load it with \
+`load_versioned_symbol`. Pinning makes runs reproducible, and multiple \
+versions of a function can coexist as distinct immutable values. External code \
+(including code from other agents) runs only after its signature is verified \
+and the trust policy is satisfied; `load_versioned_symbol` reports the \
+fingerprint and trust level, so check them when the source is external.
 
 Prefer precise, minimal edits over large rewrites.";

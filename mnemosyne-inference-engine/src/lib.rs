@@ -5,7 +5,7 @@ pub mod tool;
 
 pub use engine::InferenceEngine;
 pub use error::InferenceError;
-pub use llm::{LlmBackend, LlmRequest, LlmResponse, Message, Role};
+pub use llm::{ContentBlock, LlmBackend, LlmRequest, LlmResponse, Message, Role};
 pub use mnemosyne_symbol_registry::{
     ResolvedSymbol, SymbolRegistry, TrustLevel, TrustPolicy, TrustedKey, VersionedRef,
 };

@@ -75,7 +75,10 @@ pub fn builtin_tools() -> Vec<Tool> {
         },
         Tool {
             name: "edit_function".into(),
-            description: "Apply a structural edit to a Clojure function in a repository file."
+            description: "Apply a structural edit to an existing Clojure function in a \
+                repository file and commit it. Use this to evolve a function into a new \
+                version — the returned commit hash is the new pin. Variants: ReplaceBody, \
+                PrependToBody, WrapBody, Rename, InsertAfter."
                 .into(),
             input_schema: serde_json::json!({
                 "type": "object",
@@ -85,6 +88,60 @@ pub fn builtin_tools() -> Vec<Tool> {
                     "edit": { "type": "object", "description": "Serialised Edit variant" }
                 },
                 "required": ["repo", "file", "edit"]
+            }),
+        },
+        Tool {
+            name: "define_function".into(),
+            description: "Persist a brand-new Clojure definition — a function, a zero-arg \
+                fact-returning function (grouped under a facts.* namespace, e.g. a file \
+                with (ns facts.system-info) then (defn home-dir [] \"/home/user\")), or a \
+                raw EDN def — into a repository file, commit it, and index it so it is \
+                later findable via search_code. Use this to PROMOTE validated scratch work \
+                from the live runtime into the durable code store. To change a definition \
+                that already exists, use edit_function instead."
+                .into(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "repo": { "type": "string" },
+                    "file": { "type": "string", "description": "Repo-relative .clj file to append to (created if absent)" },
+                    "source": { "type": "string", "description": "Full Clojure form(s) to add" },
+                    "name": { "type": "string", "description": "Name to index when source is a raw def/EDN with no defn" },
+                    "docstring": { "type": "string", "description": "Optional docstring for the index" }
+                },
+                "required": ["repo", "file", "source"]
+            }),
+        },
+        Tool {
+            name: "recall_memory".into(),
+            description: "Recall recent episodes (user messages, tool calls, tool results, \
+                assistant replies) from the episodic memory log to recover context from \
+                earlier in the session."
+                .into(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "limit": { "type": "integer", "default": 10 }
+                }
+            }),
+        },
+        Tool {
+            name: "load_versioned_symbol".into(),
+            description: "Load a git-pinned Clojure symbol or namespace into the live \
+                runtime so it can be called. The registry resolves the versioned ref, \
+                verifies the commit signature, and applies the trust policy. Ref syntax: \
+                `namespace/symbol@<commit>`, `namespace@<commit>`, or \
+                `https://host/u/r::ns/sym@<commit>` for external repositories."
+                .into(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "vref": {
+                        "type": "string",
+                        "description": "Versioned ref, e.g. mnemosyne.core/deep-merge@a1b2c3d4"
+                    }
+                },
+                "required": ["vref"]
             }),
         },
     ]

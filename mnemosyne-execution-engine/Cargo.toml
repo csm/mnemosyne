@@ -8,10 +8,14 @@ edition.workspace = true
 cljrs-eval.workspace   = true
 cljrs-value.workspace  = true
 cljrs-reader.workspace = true
+cljrs-async.workspace  = true
+cljrs-io.workspace     = true
+cljrs-net.workspace    = true
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
+tokio = { workspace = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }

@@ -10,6 +10,8 @@ pub enum ExecutionError {
     Uninitialized,
     #[error("timeout")]
     Timeout,
+    #[error("clojure runtime thread is no longer running")]
+    RuntimeGone,
     #[error("serialization error: {0}")]
     Serde(#[from] serde_json::Error),
 }
