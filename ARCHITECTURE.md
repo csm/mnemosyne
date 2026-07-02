@@ -53,9 +53,13 @@ planner; Clojure is the execution substrate.
 | `mnemosyne-experiment` | Candidate generation pipeline: propose → validate → score → promote |
 | `mnemosyne-inference-engine` | Agent loop, LLM orchestration, tool dispatch |
 | `mnemosyne-interface` | Pluggable adapter trait + HTTP/SSE and CLI implementations |
+| `mnemosyne-mcp-core` | Self-contained MCP protocol layer: JSON-RPC framing, lifecycle, tool trait, stdio transport |
+| `mnemosyne-mcp` | MCP tool implementations: Clojure eval, function lookup, save, annotate |
+| `mnemosyne-mcp-server` | Self-contained MCP server binary (stdio) |
 
-The first four crates in the table (`code-storage` through `core-functions`) and
-`inference-engine` have initial implementations. The remaining five are planned.
+The first four crates in the table (`code-storage` through `core-functions`),
+`inference-engine`, and the three MCP crates have initial implementations. The
+remaining crates are planned.
 
 ## Key Design Decisions
 
@@ -129,6 +133,33 @@ propose → spec-check → sandbox-eval → score → promote | discard
 - **proof gate** (optional) — for pure functions being promoted to the core
   library, translate to Lean 4 via subprocess and require a proof to pass
   before promotion
+
+### MCP Surface
+
+Mnemosyne's capabilities are exposed to external agents (Claude Code, other
+MCP clients) through the Model Context Protocol. The MCP stack is split into
+three crates so each layer stays independently reusable:
+
+```
+mnemosyne-mcp-server   (binary: stdio transport + configuration)
+        │
+mnemosyne-mcp          (tools: eval / lookup / save / annotate over the crates above)
+        │
+mnemosyne-mcp-core     (protocol: JSON-RPC 2.0, MCP lifecycle, McpTool trait — no Mnemosyne deps)
+```
+
+The four tools mirror the agent's own loop, letting an external LLM act as
+the planner over the same substrate:
+
+| Tool | Purpose |
+|---|---|
+| `clojure_eval` | Evaluate Clojure in a persistent runtime session (capabilities gated by `IoPolicy`) |
+| `function_lookup` | Semantic (intent) search, full-text fallback, and exact `ns/name[@commit]` resolution returning pinned source |
+| `save_function` | Commit a definition into the internal git repo; returns the `ns/name@commit` pin |
+| `annotate_function` | Attach descriptions/use cases as EDN sidecars in git, folded into the search indexes |
+
+See `mnemosyne-mcp/README.md` for tool schemas, storage layout, and the
+forward plan (HTTP transport, resources, structured output).
 
 ### Pluggable Interface
 

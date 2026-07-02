@@ -10,6 +10,9 @@ members = [
     "mnemosyne-inference-engine",
     "mnemosyne-memory",
     "mnemosyne-interface",
+    "mnemosyne-mcp-core",
+    "mnemosyne-mcp",
+    "mnemosyne-mcp-server",
 ]
 resolver = "2"
 
@@ -43,6 +46,8 @@ serde_json = "1"
 # Error handling
 thiserror = "2"
 anyhow = "1"
+# Async trait objects
+async-trait = "0.1"
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -57,3 +62,7 @@ mnemosyne-inference-engine = { path = "mnemosyne-inference-engine" }
 mnemosyne-symbol-registry  = { path = "mnemosyne-symbol-registry" }
 mnemosyne-memory           = { path = "mnemosyne-memory" }
 mnemosyne-interface        = { path = "mnemosyne-interface" }
+mnemosyne-mcp-core         = { path = "mnemosyne-mcp-core" }
+# default-features = false so consumers (e.g. the server binary) control the
+# heavy `semantic` feature themselves.
+mnemosyne-mcp              = { path = "mnemosyne-mcp", default-features = false }

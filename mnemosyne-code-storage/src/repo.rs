@@ -57,6 +57,28 @@ impl CodeRepository {
         })
     }
 
+    /// Initialise a brand-new repository at `path` (like `git init`), creating
+    /// the directory if needed.
+    pub fn init(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        std::fs::create_dir_all(path)?;
+        tracing::info!(path = %path.display(), "initialising repository");
+        let inner = GitRepo::init(path)?;
+        Ok(Self {
+            inner,
+            source: RepoSource::Local(path.to_owned()),
+        })
+    }
+
+    /// Open the repository at `path`, initialising a fresh one if none exists.
+    pub fn open_or_init(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        match Self::open(path) {
+            Ok(repo) => Ok(repo),
+            Err(_) => Self::init(path),
+        }
+    }
+
     /// Clone a remote repository to `dest`.
     pub fn clone(url: &str, dest: impl AsRef<Path>) -> Result<Self> {
         let dest = dest.as_ref();
@@ -286,6 +308,20 @@ mod tests {
             source: RepoSource::Local(dir.path().to_owned()),
         };
         (dir, repo)
+    }
+
+    #[test]
+    fn open_or_init_creates_then_reopens() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("store");
+
+        let repo = CodeRepository::open_or_init(&path).unwrap();
+        repo.write_and_commit("a.clj", b"(ns a)", "init", None)
+            .unwrap();
+
+        // Second call must open the existing repo, not re-init it.
+        let reopened = CodeRepository::open_or_init(&path).unwrap();
+        assert_eq!(reopened.files_at_rev("HEAD").unwrap().len(), 1);
     }
 
     #[test]

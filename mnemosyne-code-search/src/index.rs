@@ -67,6 +67,24 @@ impl CodeIndex {
     /// Index a batch of functions, then commit.
     pub fn add_functions(&self, fns: &[IndexedFunction]) -> Result<()> {
         let mut writer: IndexWriter = self.index.writer(50_000_000)?;
+        self.write_functions(&mut writer, fns)?;
+        writer.commit()?;
+        Ok(())
+    }
+
+    /// Atomically replace the entire index contents with `fns`.
+    ///
+    /// Used to resynchronise the index with a repository after functions are
+    /// modified in place (Tantivy has no per-document update).
+    pub fn replace_all(&self, fns: &[IndexedFunction]) -> Result<()> {
+        let mut writer: IndexWriter = self.index.writer(50_000_000)?;
+        writer.delete_all_documents()?;
+        self.write_functions(&mut writer, fns)?;
+        writer.commit()?;
+        Ok(())
+    }
+
+    fn write_functions(&self, writer: &mut IndexWriter, fns: &[IndexedFunction]) -> Result<()> {
         for f in fns {
             let mut doc = TantivyDocument::default();
             doc.add_text(self.schema.repo, &f.repo);
@@ -78,7 +96,6 @@ impl CodeIndex {
             doc.add_text(self.schema.body, &f.body);
             writer.add_document(doc)?;
         }
-        writer.commit()?;
         Ok(())
     }
 
