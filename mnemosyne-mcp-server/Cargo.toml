@@ -1,0 +1,21 @@
+[package]
+name = "mnemosyne-mcp-server"
+description = "Self-contained MCP server binary exposing Mnemosyne over stdio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "mnemosyne-mcp-server"
+path = "src/main.rs"
+
+[features]
+default = ["semantic"]
+semantic = ["mnemosyne-mcp/semantic"]
+
+[dependencies]
+mnemosyne-mcp = { workspace = true, default-features = false }
+anyhow.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

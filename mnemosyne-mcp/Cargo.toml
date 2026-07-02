@@ -1,0 +1,33 @@
+[package]
+name = "mnemosyne-mcp"
+description = "MCP tools exposing Mnemosyne: Clojure eval, function lookup, save-to-git, and annotation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["semantic"]
+# Embedding-based intent search for `function_lookup`. Off, the tool degrades
+# to full-text (Tantivy) search — useful for lightweight builds since the
+# embedder pulls in candle and downloads model weights on first use.
+semantic = ["dep:mnemosyne-semantic-search"]
+
+[dependencies]
+mnemosyne-mcp-core.workspace = true
+mnemosyne-execution-engine.workspace = true
+mnemosyne-core-functions.workspace = true
+mnemosyne-code-storage.workspace = true
+mnemosyne-code-search.workspace = true
+mnemosyne-symbol-registry.workspace = true
+mnemosyne-semantic-search = { workspace = true, optional = true }
+
+anyhow.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
