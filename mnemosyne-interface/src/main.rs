@@ -118,6 +118,19 @@ async fn main() -> anyhow::Result<()> {
         );
     }
     let runtime = RuntimeHandle::spawn_minimal_with_policy(policy);
+    if args.allow_file_io {
+        // The shell utilities are defined over the file-IO substrate, so they
+        // ride the same capability flag.
+        runtime
+            .eval(mnemosyne_core_functions::embedded::SHELL_CLJ)
+            .await
+            .map_err(|e| anyhow::anyhow!("failed to load mnemosyne.shell: {e}"))?;
+        runtime
+            .set_namespace("user")
+            .await
+            .map_err(|e| anyhow::anyhow!("failed to reset namespace: {e}"))?;
+        tracing::info!("mnemosyne.shell utilities loaded");
+    }
 
     let index_dir = args
         .index_dir

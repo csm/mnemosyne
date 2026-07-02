@@ -563,6 +563,17 @@ cljrs-net), always within the configured guardrails. Prefer the smallest \
 capability that does the job, and expect IO/network calls to be asynchronous. \
 You may NOT shell out or exec arbitrary programs — that path is disabled.
 
+When file IO is granted, the `mnemosyne.shell` namespace provides \
+shell-program equivalents as composable channel pipelines — cat, cat*, ls, \
+find, grep, head, tail, wc-l, sed, sort-ch, uniq, stat, exists?, write-lines, \
+cp — plus `pipe` to apply any transducer to a channel and `collect` to drain \
+one into a vector. Every stage takes its input channel last, so pipelines \
+thread with ->>: \
+`(->> (mnemosyne.shell/find \"src\" {:name \"*.clj\" :type :file}) \
+(mnemosyne.shell/grep #\"defn\") (mnemosyne.shell/head 10) \
+mnemosyne.shell/collect clojure.core.async/<?)`. Prefer these over \
+hand-rolled loops when exploring files.
+
 ## Versioned symbols and trust
 
 When you reference code by version, pin it to a commit with the versioned-ref \
