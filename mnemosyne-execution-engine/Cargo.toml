@@ -6,6 +6,7 @@ edition.workspace = true
 
 [dependencies]
 cljrs-eval.workspace   = true
+cljrs-gc.workspace     = true
 cljrs-value.workspace  = true
 cljrs-reader.workspace = true
 cljrs-async.workspace  = true

@@ -11,6 +11,7 @@ path = "src/main.rs"
 [dependencies]
 mnemosyne-inference-engine.workspace = true
 mnemosyne-code-search.workspace = true
+mnemosyne-core-functions.workspace = true
 mnemosyne-execution-engine.workspace = true
 mnemosyne-memory.workspace = true
 tokio.workspace = true

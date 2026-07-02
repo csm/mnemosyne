@@ -32,7 +32,8 @@ use crate::{ClojureRuntime, ClojureValue, ExecutionError, Result};
 pub struct IoPolicy {
     /// Load `clojure.core.async` (channels, `^:async`, `await`).
     pub async_enabled: bool,
-    /// Load async file IO (`clojure.rust.io.async`).
+    /// Load async file IO (`clojure.rust.io.async`) and the directory /
+    /// metadata builtins (`mnemosyne.shell.native`).
     pub file_io: bool,
     /// Load networking (`clojure.rust.net.*`).
     pub network: bool,
@@ -70,6 +71,9 @@ fn install_substrate(rt: &ClojureRuntime, policy: &IoPolicy) {
     cljrs_async::init(globals);
     if policy.file_io {
         cljrs_io::init(globals);
+        // Directory listing / walking / stat live alongside the cljrs-io
+        // content primitives and are gated by the same capability.
+        crate::shell_native::register(globals);
     }
     if policy.network {
         cljrs_net::init(globals);

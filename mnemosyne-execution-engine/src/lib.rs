@@ -1,6 +1,7 @@
 pub mod error;
 pub mod handle;
 pub mod runtime;
+pub mod shell_native;
 pub mod value;
 
 pub use error::ExecutionError;
