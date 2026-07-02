@@ -188,8 +188,8 @@ impl<'a> EdnCursor<'a> {
                 }
                 Some(_) => {
                     // Push the full UTF-8 char, not the raw byte.
-                    let rest = std::str::from_utf8(&self.bytes[self.i..])
-                        .map_err(|e| e.to_string())?;
+                    let rest =
+                        std::str::from_utf8(&self.bytes[self.i..]).map_err(|e| e.to_string())?;
                     let ch = rest.chars().next().unwrap();
                     out.push(ch);
                     self.i += ch.len_utf8();
@@ -218,7 +218,10 @@ impl<'a> EdnCursor<'a> {
                 }
                 Some(b'"') => out.push(self.read_string()?),
                 Some(other) => {
-                    return Err(format!("expected string in vector, got '{}'", other as char))
+                    return Err(format!(
+                        "expected string in vector, got '{}'",
+                        other as char
+                    ))
                 }
                 None => return Err("unterminated vector".into()),
             }

@@ -69,18 +69,13 @@ impl McpServer {
 
         // A message without `method` is a response to a server-initiated
         // request; we never send any, so ignore it.
-        if raw.get("method").is_none() {
-            return None;
-        }
+        raw.get("method")?;
 
         let req: Request = match serde_json::from_value(raw) {
             Ok(r) => r,
             Err(e) => {
-                let resp = Response::error(
-                    Value::Null,
-                    PARSE_ERROR,
-                    format!("malformed request: {e}"),
-                );
+                let resp =
+                    Response::error(Value::Null, PARSE_ERROR, format!("malformed request: {e}"));
                 return serde_json::to_string(&resp).ok();
             }
         };
@@ -288,10 +283,9 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_tool_is_invalid_params() {
-        let resp = roundtrip(
-            r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"nope"}}"#,
-        )
-        .await;
+        let resp =
+            roundtrip(r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"nope"}}"#)
+                .await;
         assert_eq!(resp["error"]["code"], INVALID_PARAMS);
     }
 

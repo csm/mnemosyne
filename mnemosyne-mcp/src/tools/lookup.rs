@@ -135,9 +135,7 @@ impl LookupTool {
             match repo.resolve_commit_hash(rev) {
                 Ok(sha) => sha,
                 Err(_) if commit.is_none() => {
-                    return CallToolResult::error(
-                        "the code store is empty — save a function first",
-                    )
+                    return CallToolResult::error("the code store is empty — save a function first")
                 }
                 Err(e) => return CallToolResult::error(format!("could not resolve '{rev}': {e}")),
             }
@@ -217,7 +215,9 @@ impl LookupTool {
                 let mut seen = std::collections::HashSet::new();
                 let hits: Vec<(f32, IndexedFunction)> = results
                     .into_iter()
-                    .filter(|r| seen.insert((r.function.file_path.clone(), r.function.name.clone())))
+                    .filter(|r| {
+                        seen.insert((r.function.file_path.clone(), r.function.name.clone()))
+                    })
                     .take(limit)
                     .map(|r| (r.score, r.function))
                     .collect();
@@ -226,7 +226,9 @@ impl LookupTool {
             Err(reason) => self.fulltext(
                 query,
                 limit,
-                Some(format!("semantic search unavailable ({reason}); showing full-text results")),
+                Some(format!(
+                    "semantic search unavailable ({reason}); showing full-text results"
+                )),
             ),
         }
     }

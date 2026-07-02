@@ -29,7 +29,9 @@ pub fn collect_functions(repo: &CodeRepository) -> Vec<IndexedFunction> {
     // Pass 1: annotation sidecars, keyed by (namespace-dir-path, fn-name).
     let mut annotations: HashMap<(String, String), Annotation> = HashMap::new();
     for f in &files {
-        let Some(path) = f.path.to_str() else { continue };
+        let Some(path) = f.path.to_str() else {
+            continue;
+        };
         let Some(rest) = path.strip_prefix("meta/") else {
             continue;
         };
@@ -53,7 +55,9 @@ pub fn collect_functions(repo: &CodeRepository) -> Vec<IndexedFunction> {
     // Pass 2: definitions in Clojure sources.
     let mut out = Vec::new();
     for f in &files {
-        let Some(path) = f.path.to_str() else { continue };
+        let Some(path) = f.path.to_str() else {
+            continue;
+        };
         if path.starts_with("meta/") {
             continue;
         }

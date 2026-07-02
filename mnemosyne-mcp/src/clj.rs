@@ -70,7 +70,10 @@ pub fn top_level_defs(source: &str) -> Vec<TopLevelDef> {
 /// Replace the top-level definition named `name` in `existing` with
 /// `new_source`, or append `new_source` when no such definition exists.
 pub fn upsert_def(existing: &str, name: &str, new_source: &str) -> String {
-    match top_level_defs(existing).into_iter().find(|d| d.name == name) {
+    match top_level_defs(existing)
+        .into_iter()
+        .find(|d| d.name == name)
+    {
         Some(def) => format!(
             "{}{}{}",
             &existing[..def.start],
@@ -246,7 +249,10 @@ impl<'a> Cursor<'a> {
         let start = self.i;
         while let Some(b) = self.peek() {
             if b.is_ascii_whitespace()
-                || matches!(b, b',' | b'(' | b')' | b'[' | b']' | b'{' | b'}' | b'"' | b';')
+                || matches!(
+                    b,
+                    b',' | b'(' | b')' | b'[' | b']' | b'{' | b'}' | b'"' | b';'
+                )
             {
                 break;
             }
@@ -359,7 +365,11 @@ mod tests {
     #[test]
     fn upsert_replaces_existing_definition() {
         let existing = "(ns foo)\n\n(defn add [a b] (+ a b))\n\n(defn sub [a b] (- a b))\n";
-        let updated = upsert_def(existing, "add", "(defn add\n  \"v2\"\n  [a b]\n  (+ a b 0))");
+        let updated = upsert_def(
+            existing,
+            "add",
+            "(defn add\n  \"v2\"\n  [a b]\n  (+ a b 0))",
+        );
         assert!(updated.contains("\"v2\""));
         assert!(!updated.contains("(defn add [a b] (+ a b))"));
         // The sibling function is untouched.

@@ -34,7 +34,10 @@ async fn call_tool(server: &McpServer, name: &str, arguments: Value) -> (bool, S
         "unexpected protocol error: {reply}"
     );
     let is_error = v["result"]["isError"].as_bool().unwrap();
-    let text = v["result"]["content"][0]["text"].as_str().unwrap().to_owned();
+    let text = v["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     (is_error, text)
 }
 
@@ -91,7 +94,12 @@ async fn eval_returns_value_and_persists_definitions() {
     )
     .await;
     assert!(!err);
-    let (err, text) = call_tool(&server, "clojure_eval", json!({ "code": "(* scratch-x 2)" })).await;
+    let (err, text) = call_tool(
+        &server,
+        "clojure_eval",
+        json!({ "code": "(* scratch-x 2)" }),
+    )
+    .await;
     assert!(!err, "{text}");
     assert_eq!(text, "42");
 
@@ -207,7 +215,10 @@ async fn save_lookup_annotate_round_trip() {
     .await;
     assert!(!err, "{text}");
     assert!(text.contains("v2"), "{text}");
-    assert!(!text.contains("(+ a b))"), "old body should be replaced: {text}");
+    assert!(
+        !text.contains("(+ a b))"),
+        "old body should be replaced: {text}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

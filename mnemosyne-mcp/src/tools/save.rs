@@ -118,9 +118,7 @@ impl McpTool for SaveFunctionTool {
         // index rebuilds; it rides along in the same commit.
         let annotation = match (&args.docstring, &parsed_docstring) {
             (Some(d), None) => {
-                let mut ann = self
-                    .read_annotation(ns, name)
-                    .unwrap_or_default();
+                let mut ann = self.read_annotation(ns, name).unwrap_or_default();
                 ann.merge(Some(d.clone()), vec![]);
                 Some(ann)
             }
