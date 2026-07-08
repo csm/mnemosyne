@@ -43,6 +43,30 @@ runtime host capabilities (everything is denied by default);
 Logging goes to stderr (`RUST_LOG`, default `info`); stdout carries the
 protocol.
 
+## Agent onboarding
+
+Two mechanisms orient a fresh agent session, so its first lookup never lands
+on an empty, unexplained system:
+
+- **`initialize` instructions** — the server returns usage guidance from the
+  MCP `initialize` handshake: what Mnemosyne is for (evaluate Clojure and
+  reuse stored functions instead of reaching for host shell tools), the
+  lookup → eval → save → annotate workflow, and which built-in namespaces are
+  loaded. The text is generated per configuration: it says when the built-ins
+  are not preloaded (`--minimal-runtime`) and when `mnemosyne.shell` is
+  unavailable because file IO is denied. Since runtime introspection (`doc`,
+  `ns-publics`) is not supported by the interpreter yet, the instructions
+  steer discovery through `function_lookup`.
+- **Seeded built-in library** — on every boot the embedded namespaces
+  (`mnemosyne.core`, `mnemosyne.templates`, `mnemosyne.shell`) are committed
+  into the internal code repository (`src/mnemosyne/*.clj`) whenever their
+  content differs from the binary's embedded sources. All three lookup paths
+  — semantic, full-text, and exact — therefore work from the first query, and
+  the built-ins get the same `ns/name@commit` pins and annotation sidecars as
+  saved functions. If a built-in file in the store drifts (edited via
+  `save_function`, or the binary was upgraded), the next boot re-syncs it;
+  superseded versions remain reachable through git history and old pins.
+
 ## Tools
 
 ### `clojure_eval`

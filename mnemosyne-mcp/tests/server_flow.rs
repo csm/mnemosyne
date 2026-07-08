@@ -55,6 +55,14 @@ async fn initialize_lists_all_four_tools() {
     let init: Value = serde_json::from_str(&init).unwrap();
     assert_eq!(init["result"]["serverInfo"]["name"], "mnemosyne");
 
+    // The instructions orient a fresh agent and track this configuration:
+    // minimal runtime, file IO denied.
+    let instructions = init["result"]["instructions"].as_str().unwrap();
+    assert!(instructions.contains("mnemosyne.core"), "{instructions}");
+    assert!(instructions.contains("mnemosyne.shell"), "{instructions}");
+    assert!(instructions.contains("NOT preloaded"), "{instructions}");
+    assert!(instructions.contains("--allow-file-io"), "{instructions}");
+
     let list = server
         .handle_line(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#)
         .await
@@ -75,6 +83,44 @@ async fn initialize_lists_all_four_tools() {
             "annotate_function"
         ]
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn builtins_are_discoverable_on_a_fresh_store() {
+    let dir = TempDir::new().unwrap();
+    let server = test_server(&dir).await;
+
+    // Exact lookup of a built-in works before anything has been saved.
+    let (err, text) = call_tool(
+        &server,
+        "function_lookup",
+        json!({ "query": "mnemosyne.core/deep-merge", "mode": "exact" }),
+    )
+    .await;
+    assert!(!err, "{text}");
+    assert!(text.contains("(defn deep-merge"), "{text}");
+    assert!(text.contains("mnemosyne.core/deep-merge@"), "{text}");
+
+    // Full-text search over built-in docstrings works from the first query.
+    let (err, text) = call_tool(
+        &server,
+        "function_lookup",
+        json!({ "query": "recursively merge maps", "mode": "fulltext" }),
+    )
+    .await;
+    assert!(!err, "{text}");
+    assert!(text.contains("mnemosyne.core/deep-merge"), "{text}");
+
+    // The shell namespace is indexed too, even though this session's IO
+    // policy prevents loading it into the runtime.
+    let (err, text) = call_tool(
+        &server,
+        "function_lookup",
+        json!({ "query": "mnemosyne.shell/grep", "mode": "exact" }),
+    )
+    .await;
+    assert!(!err, "{text}");
+    assert!(text.contains("(defn grep"), "{text}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -114,7 +160,8 @@ async fn save_lookup_annotate_round_trip() {
     let dir = TempDir::new().unwrap();
     let server = test_server(&dir).await;
 
-    // Exact lookup on an empty store explains the situation.
+    // The store is never empty (it is seeded with the built-in library), so
+    // looking up a namespace that doesn't exist is a plain not-found error.
     let (err, text) = call_tool(
         &server,
         "function_lookup",
@@ -122,7 +169,7 @@ async fn save_lookup_annotate_round_trip() {
     )
     .await;
     assert!(err);
-    assert!(text.contains("empty"), "{text}");
+    assert!(text.contains("not found"), "{text}");
 
     // Save a function.
     let (err, text) = call_tool(

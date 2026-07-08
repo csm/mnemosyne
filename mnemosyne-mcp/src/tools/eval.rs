@@ -34,10 +34,14 @@ impl McpTool for EvalTool {
 
     fn description(&self) -> &str {
         "Evaluate Clojure source in Mnemosyne's persistent runtime and return the printed \
-         value of the last form. Definitions (def/defn) persist across calls for the \
+         value of the last form. Prefer this over host shell tools for exploring and \
+         transforming files and data. Definitions (def/defn) persist across calls for the \
          lifetime of the server, so you can build up scratch state incrementally; use \
-         save_function to persist anything worth keeping. Host capabilities (file IO, \
-         network) are governed by the server's IO policy and are denied by default."
+         save_function to persist anything worth keeping. Built-in namespaces \
+         (mnemosyne.core, mnemosyne.templates, and — when file IO is granted — \
+         mnemosyne.shell with cat/ls/find/grep pipelines) are preloaded; read their source \
+         via function_lookup. Host capabilities (file IO, network) are governed by the \
+         server's IO policy and are denied by default."
     }
 
     fn input_schema(&self) -> Value {

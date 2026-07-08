@@ -158,6 +158,12 @@ the planner over the same substrate:
 | `save_function` | Commit a definition into the internal git repo; returns the `ns/name@commit` pin |
 | `annotate_function` | Attach descriptions/use cases as EDN sidecars in git, folded into the search indexes |
 
+Two onboarding mechanisms keep a fresh external agent from starting blind:
+the `initialize` handshake returns configuration-aware instructions (what the
+system is for, the lookup-first workflow, which built-ins this session has),
+and the built-in library is seeded into the code store on boot so every
+lookup path is populated before the first function is ever saved.
+
 See `mnemosyne-mcp/README.md` for tool schemas, storage layout, and the
 forward plan (HTTP transport, resources, structured output).
 
