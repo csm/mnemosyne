@@ -49,7 +49,9 @@ impl McpTool for LookupTool {
          versioned ref, trust status, and any annotations. (2) semantic search — query is \
          a natural-language description of what you need (falls back to full-text search \
          when the embedding model is unavailable). Mode is auto-detected from the query \
-         shape; pass `mode` to force it."
+         shape; pass `mode` to force it. The store is never empty: it is pre-seeded with \
+         the built-in library (mnemosyne.core, mnemosyne.shell, mnemosyne.templates), so \
+         search here before writing a function from scratch."
     }
 
     fn input_schema(&self) -> Value {

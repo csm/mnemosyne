@@ -24,20 +24,20 @@ license = "MIT"
 
 [workspace.dependencies]
 # Clojurust interpreter (published on crates.io)
-cljrs-value    = "0.1.147"
-cljrs-reader   = "0.1.147"
-cljrs-types    = "0.1.147"
-cljrs-env      = "0.1.147"
-cljrs-eval     = "0.1.147"
-cljrs-gc       = "0.1.147"
-cljrs-interp   = "0.1.147"
-cljrs-builtins = "0.1.147"
-cljrs-stdlib   = "0.1.147"
-cljrs-runtime  = "0.1.147"
+cljrs-value    = "0.1.221"
+cljrs-reader   = "0.1.221"
+cljrs-types    = "0.1.221"
+cljrs-env      = "0.1.221"
+cljrs-eval     = "0.1.221"
+cljrs-gc       = "0.1.221"
+cljrs-interp   = "0.1.221"
+cljrs-builtins = "0.1.221"
+cljrs-stdlib   = "0.1.221"
+cljrs-runtime  = "0.1.221"
 # Async IO / networking substrate (fully async, core.async over tokio)
-cljrs-async = "0.1.147"
-cljrs-io    = "0.1.147"
-cljrs-net   = "0.1.147"
+cljrs-async = "0.1.221"
+cljrs-io    = "0.1.221"
+cljrs-net   = "0.1.221"
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 # Serialization

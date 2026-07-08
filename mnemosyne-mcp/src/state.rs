@@ -9,7 +9,7 @@ use mnemosyne_code_storage::CodeRepository;
 use mnemosyne_execution_engine::{ClojureRuntime, IoPolicy, RuntimeHandle};
 use mnemosyne_symbol_registry::{SymbolRegistry, TrustPolicy};
 
-use crate::indexer;
+use crate::{indexer, seed};
 
 #[cfg(feature = "semantic")]
 use mnemosyne_semantic_search::{EmbedModel, Embedder, SemanticIndex, SemanticResult};
@@ -73,6 +73,19 @@ impl McpState {
 
         let code_dir = data_dir.join("code");
         let repo = CodeRepository::open_or_init(&code_dir)?;
+
+        // Keep the built-in library in the store so lookups are never empty
+        // and always reflect the sources this binary loads into the runtime.
+        match seed::sync_builtins(&repo) {
+            Ok(changed) if !changed.is_empty() => {
+                tracing::info!(
+                    files = changed.len(),
+                    "built-in library synchronised into the code store"
+                );
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!("could not seed built-in library into the code store: {e}"),
+        }
 
         let mut registry =
             SymbolRegistry::new(data_dir.join("repo-cache"), TrustPolicy::permissive());
