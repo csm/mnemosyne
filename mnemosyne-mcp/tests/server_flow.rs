@@ -124,6 +124,38 @@ async fn builtins_are_discoverable_on_a_fresh_store() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn builtins_are_discoverable_in_the_runtime() {
+    // Full runtime: the built-in library is preloaded, and the instructions
+    // point agents at doc / ns-publics — make sure that path actually works.
+    let dir = TempDir::new().unwrap();
+    let server = build_server(McpConfig {
+        data_dir: dir.path().to_owned(),
+        io_policy: IoPolicy::deny_all(),
+        minimal_runtime: false,
+    })
+    .await
+    .expect("server init");
+
+    let (err, text) = call_tool(
+        &server,
+        "clojure_eval",
+        json!({ "code": "(doc mnemosyne.core/deep-merge)" }),
+    )
+    .await;
+    assert!(!err, "{text}");
+    assert!(text.contains("Recursively merge maps"), "{text}");
+
+    let (err, text) = call_tool(
+        &server,
+        "clojure_eval",
+        json!({ "code": "(keys (ns-publics 'mnemosyne.core))" }),
+    )
+    .await;
+    assert!(!err, "{text}");
+    assert!(text.contains("deep-merge"), "{text}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn eval_returns_value_and_persists_definitions() {
     let dir = TempDir::new().unwrap();
     let server = test_server(&dir).await;

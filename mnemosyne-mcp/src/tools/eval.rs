@@ -39,9 +39,10 @@ impl McpTool for EvalTool {
          lifetime of the server, so you can build up scratch state incrementally; use \
          save_function to persist anything worth keeping. Built-in namespaces \
          (mnemosyne.core, mnemosyne.templates, and — when file IO is granted — \
-         mnemosyne.shell with cat/ls/find/grep pipelines) are preloaded; read their source \
-         via function_lookup. Host capabilities (file IO, network) are governed by the \
-         server's IO policy and are denied by default."
+         mnemosyne.shell with cat/ls/find/grep pipelines) are preloaded; discover them \
+         with `(ns-publics 'mnemosyne.core)` and `(doc mnemosyne.core/deep-merge)`, or \
+         read full source via function_lookup. Host capabilities (file IO, network) are \
+         governed by the server's IO policy and are denied by default."
     }
 
     fn input_schema(&self) -> Value {

@@ -54,9 +54,11 @@ on an empty, unexplained system:
   lookup → eval → save → annotate workflow, and which built-in namespaces are
   loaded. The text is generated per configuration: it says when the built-ins
   are not preloaded (`--minimal-runtime`) and when `mnemosyne.shell` is
-  unavailable because file IO is denied. Since runtime introspection (`doc`,
-  `ns-publics`) is not supported by the interpreter yet, the instructions
-  steer discovery through `function_lookup`.
+  unavailable because file IO is denied. For discovery it recommends both
+  paths: `(ns-publics 'ns)` / `(doc ns/name)` in the runtime (cljrs ≥ 0.1.221;
+  both return values instead of printing, so they are stdio-protocol-safe)
+  and `function_lookup` for full source, pins, and intent search over the
+  store.
 - **Seeded built-in library** — on every boot the embedded namespaces
   (`mnemosyne.core`, `mnemosyne.templates`, `mnemosyne.shell`) are committed
   into the internal code repository (`src/mnemosyne/*.clj`) whenever their

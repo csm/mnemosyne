@@ -39,6 +39,9 @@ pub const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// what is already in it (the pre-seeded built-in library). Availability
 /// notes track the actual `IoPolicy` / runtime configuration so the agent is
 /// never promised a namespace this session cannot use.
+///
+/// Requires cljrs ≥ 0.1.221: the discovery guidance points agents at `doc`
+/// and `ns-publics`, which return values (rather than printing) there.
 fn instructions(config: &McpConfig) -> String {
     let builtins_loaded = !config.minimal_runtime;
     let shell_loaded = builtins_loaded && config.io_policy.file_io;
@@ -85,9 +88,10 @@ evaluate what you need first):\n"
     });
     text.push_str(
         "\
-To see what a built-in does, `function_lookup` its `namespace/name` for the full source \
-and docstring. (Runtime introspection such as `doc` and `ns-publics` is not available \
-yet — discover functions through `function_lookup`, not eval.)",
+Discovery: via `clojure_eval`, `(ns-publics 'mnemosyne.core)` lists what a loaded \
+namespace defines and `(doc mnemosyne.core/deep-merge)` returns a function's docstring. \
+Use `function_lookup` when you need full source, a pinned `@commit` ref, annotations, \
+or to search the whole store by intent.",
     );
     text
 }
@@ -131,15 +135,16 @@ mod tests {
         });
         assert!(minimal.contains("NOT preloaded"));
 
-        // Every variant names the seeded namespaces and steers discovery
-        // through function_lookup (runtime doc/ns-publics don't exist yet).
+        // Every variant names the seeded namespaces and offers both discovery
+        // paths: doc/ns-publics in the runtime, function_lookup for the store.
         for text in [&default, &with_io, &minimal] {
             for needle in [
                 "mnemosyne.core",
                 "mnemosyne.shell",
                 "mnemosyne.templates",
                 "function_lookup",
-                "not available",
+                "ns-publics",
+                "(doc ",
             ] {
                 assert!(text.contains(needle), "missing {needle:?} in: {text}");
             }
