@@ -410,6 +410,16 @@ results are cheaper than the shell exploration they replace.
    `claude -p` with a trivial one-tool prompt) inside the container:
    handshake, `tools/list`, one call per tool, one deliberately malformed
    call, one 10 MB eval output. Cheap enough for CI on every commit.
+   **Implemented** as `mnemosyne-mcp-server/tests/smoke.rs`: a Rust
+   integration test that spawns the real compiled binary as a subprocess and
+   speaks line-delimited JSON-RPC over its actual stdin/stdout, exercising
+   the process boundary that the in-process `handle_line` tests in
+   `mnemosyne-mcp/tests/server_flow.rs` can't reach. No container or Docker
+   network needed yet since there's no LLM to sandbox; it runs under the
+   existing `cargo test --workspace` CI job. (`(apply str (repeat n "x"))`
+   is O(n²) in the current runtime and unusable past a few thousand
+   characters — the large-output case uses a doubling
+   `loop`/`recur` instead.)
 2. **Phase 1 — the four scenarios**, single-session, both modes, 3 seeds
    each (24 runs). Deliverables: pass rates, tool-adoption stats, and a
    qualitative failure review from transcripts. Expect this phase to mostly
