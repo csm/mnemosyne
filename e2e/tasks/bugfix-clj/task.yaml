@@ -1,0 +1,8 @@
+id: bugfix-clj
+mode: mnemosyne-only          # or: mixed
+io_policy: allow-all          # server flags for the run
+timeout_minutes: 30
+max_turns: 80
+seed: 1
+prompt_file: prompt.md
+grader: grader/bugfix-clj-grader   # built by grader/build.sh (see run.sh)
