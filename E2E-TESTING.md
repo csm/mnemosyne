@@ -310,8 +310,11 @@ e2e/
   results/<run-id>/
       transcript.jsonl      # stream-json from the harness
       grade.json            # grader output (score, per-check detail)
-      metrics.json          # turns, tokens, cost (from LiteLLM), wall time,
-                            #   per-tool call counts, saves/lookups/reuse
+      metrics.json          # turns, wall time, cache-aware token/cost fields,
+                            #   per-tool call counts, Mnemosyne token
+                            #   attribution, saves/lookups/reuse
+      litellm-usage.jsonl   # raw per-request proxy log, kept verbatim so
+                            #   token analyses can be redone without re-running
       mnemosyne-data.tar    # snapshot of the function store after the run
 ```
 
@@ -336,14 +339,70 @@ Per run, extracted from the transcript + LiteLLM + grader:
 |---|---|
 | Task score (0–1, per-check detail) | grader |
 | Turns, wall time | transcript |
-| Tokens and $ cost | LiteLLM logs |
+| Token usage and $ cost (cache-aware; see below) | LiteLLM logs + transcript `usage` |
 | Calls per tool (`clojure_eval`, `function_lookup`, `save_function`, `annotate_function`) | transcript |
+| Mnemosyne token attribution (see below) | transcript |
 | Eval errors / protocol errors / tool-call failures | transcript + server stderr |
 | Functions saved; annotated fraction | data-dir git log |
 | (Phase 2) stored-function reuse: lookups that returned session-1 functions and were subsequently eval'd | transcript × git log |
 
 Every scenario should run with ≥3 seeds before believing any number; LLM
 task success is high-variance.
+
+### Token efficiency
+
+Token efficiency is a first-class metric — "reuse stored functions instead
+of re-deriving them" is in large part a token-economy claim. The numbers are
+imperfect (estimates below are estimates); we record them anyway, because a
+measurable proxy beats an unmeasured claim. Two independent sources, both
+kept for every run from Phase 0 onward so analyses can be added
+retroactively without re-spending credits:
+
+- **LiteLLM proxy logs** — ground truth for total spend: per-request
+  prompt/completion/cache tokens and computed cost, including retries and
+  anything the harness does not self-report. One proxy instance per run (it
+  is a throwaway sidecar), so attribution is free.
+- **Harness transcript** — Claude Code's final `result` message carries a
+  `usage` block (input, output, cache-creation, cache-read tokens) and
+  `total_cost_usd`; the per-message stream is what enables the decomposition
+  below. The two sources cross-check each other; disagreement beyond
+  retry noise is itself a bug report.
+
+**Cache-aware definitions.** An agent loop resends the growing conversation
+every turn, so *raw* input tokens grow roughly quadratically with turns while
+most of them are cache reads billed at a small fraction of the fresh-token
+price. Raw input tokens therefore overstate the cost of long runs and must
+not be used as the headline. `metrics.json` records:
+
+| Field | Definition |
+|---|---|
+| `cost_usd` | headline; from LiteLLM (absent for local models — compare tokens instead) |
+| `output_tokens` | headline; tracks actual generation work |
+| `input_fresh_tokens` | non-cached input + cache-creation tokens |
+| `input_cache_read_tokens` | reported separately, never summed into a headline |
+| `turns` | denominator for per-turn normalization |
+
+Cross-model comparisons use `cost_usd` only (tokenizers differ);
+within-model comparisons — Mnemosyne vs plain, carryover session 1 vs 2 —
+may use token counts directly. That is exactly the shape of the Phase 2/3
+questions, so the restriction costs nothing.
+
+**Mnemosyne attribution.** Total cost says whether a run was expensive; the
+decomposition says whether *Mnemosyne* was the expensive part. Mnemosyne
+consumes context three ways, all visible in the transcript:
+
+1. fixed per-turn overhead: the four tool schemas + `initialize`
+   instructions text (constant per run configuration; measured once);
+2. `function_lookup` results — full source blobs, the price of retrieval;
+3. `clojure_eval` / other tool-result payloads.
+
+The `metrics.json` post-processor sums `tool_result` content sizes per tool
+and converts to approximate tokens (chars/4, or a local tokenizer — this is
+for decomposition, not billing, so an estimate is acceptable). This is what
+lets a carryover result be stated as "session 2 spent 8k input tokens on
+lookup results and saved ~30k output tokens of re-derivation" rather than a
+single opaque delta — and, in `mixed` mode, what shows whether lookup
+results are cheaper than the shell exploration they replace.
 
 ## Phases
 
