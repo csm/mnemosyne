@@ -154,7 +154,7 @@ of a full baseline:
 
 ## Scenarios
 
-Three task families, each playing to a different part of the stack. Each
+Four task families, each playing to a different part of the stack. Each
 task is a directory with a `task.yaml`, a fixture, and a grader (see layout
 below).
 
@@ -183,7 +183,43 @@ byte-identical to the originals. Score: hidden-suite pass rate.
 the seeded built-ins; ideally `save_function` for helper predicates it builds
 while diagnosing.
 
-### 2. `sadserver-webstack` — diagnose a malfunctioning system
+### 2. `bugfix-py` — fix a bug in a mainstream-language source tree
+
+**Fixture:** a small Python project (~8 modules; e.g. a Flask JSON API with a
+service layer and a data-munging module) with 2 seeded bugs mirroring the
+Clojure task's difficulty split: one shallow (a mutable default argument /
+off-by-one in pagination) and one requiring real understanding (a timezone or
+encoding error that only manifests on certain inputs). Visible happy-path
+tests via `pytest`; `python3` and `pytest` preinstalled in the image. Baked
+into the image at `/task/project`.
+
+**Prompt:** same shape as `bugfix-clj`: "Users report X; some tests fail.
+Find and fix the bugs in `/task/project`. Do not modify the test files."
+
+**Why a non-Clojure task matters:** this is the *common case* for a real
+user — the code being worked on is not Clojure, so `clojure_eval`'s REPL
+cannot host the task's code directly. Mnemosyne's contribution has to come
+from `mnemosyne.shell` (running `pytest`, `grep`, applying edits) and from
+saved/looked-up helper functions (e.g. a "run tests and summarize failures"
+function). In `mnemosyne-only` mode this is the sharpest ergonomics test of
+shell-through-Clojure on someone else's stack; in `mixed` mode it asks the
+honest question of whether the model bothers with Mnemosyne at all when the
+task language doesn't match — if adoption is ~zero here, that's a finding
+about positioning, not a test failure. A TypeScript twin (`bugfix-ts`, same
+recipe with `vitest`) is a cheap later addition if we want a second data
+point; Python first since it's the most common case and keeps the image lean.
+
+**Grading:** identical machinery to `bugfix-clj`: hidden `pytest` suite
+(superset including regressions for both seeded bugs) run in the grader
+container against the agent's tree, plus byte-identity check on visible test
+files. Score: hidden-suite pass rate.
+
+**Expected Mnemosyne usage:** `clojure_eval` + `mnemosyne.shell` as the
+edit/test loop; `save_function` for reusable dev-workflow helpers (test
+runner, failure parser) rather than domain logic — which is exactly the kind
+of function Phase 2 carryover should reward.
+
+### 3. `sadserver-webstack` — diagnose a malfunctioning system
 
 **Fixture:** the agent container itself is the sick box (sadservers.com
 style): nginx reverse-proxying a small app backed by SQLite, plus a cron'd
@@ -210,7 +246,7 @@ inspection (`ps`, `ss`, config files); building small parse/check functions;
 in `mnemosyne-only` mode this is a strong test that shell-through-Clojure is
 ergonomic enough for ops work.
 
-### 3. `logs-analysis` — derive facts from access logs
+### 4. `logs-analysis` — derive facts from access logs
 
 **Fixture:** `generate.py` (runs on the host at task-build time) produces
 ~500 MB of combined-format nginx access logs at `/task/logs/` with injected
@@ -244,6 +280,10 @@ agent session (and fresh task container):
   saved in session 1? Time/turns/tokens delta between the sessions is the
   headline number.
 - `bugfix-clj` → `bugfix-clj-2` (related library, overlapping domain).
+- `bugfix-py` → `bugfix-py-2` (different Python project, same workflow).
+  The interesting reuse here is *cross-project dev tooling* — the test-runner
+  and failure-parser helpers from session 1 apply verbatim to a new codebase,
+  unlike domain functions.
 
 Detection is mechanical: the data dir is a git repo, so "functions saved in
 session 1" is a commit range, and the session-2 transcript shows whether
@@ -311,8 +351,8 @@ task success is high-variance.
    `claude -p` with a trivial one-tool prompt) inside the container:
    handshake, `tools/list`, one call per tool, one deliberately malformed
    call, one 10 MB eval output. Cheap enough for CI on every commit.
-2. **Phase 1 — the three scenarios**, single-session, both modes, 3 seeds
-   each (18 runs). Deliverables: pass rates, tool-adoption stats, and a
+2. **Phase 1 — the four scenarios**, single-session, both modes, 3 seeds
+   each (24 runs). Deliverables: pass rates, tool-adoption stats, and a
    qualitative failure review from transcripts. Expect this phase to mostly
    surface *server* issues (instruction text the model misreads, eval output
    truncation, error messages the model can't act on) — that's the point.
