@@ -1,4 +1,4 @@
-# Base agent image: mnemosyne-mcp-server (built with the `semantic` feature)
+# Base agent image: mnemosyne-mcp-server (semantic search optional)
 # + Claude Code, the harness. Task images `FROM` this and layer in a fixture
 # (see tasks/<id>/fixture/Dockerfile) — this file never sees a task's
 # fixture or grader, so it is built once and reused across all tasks/seeds.
@@ -6,11 +6,11 @@
 # Build context is the repo root (run.sh passes REPO_ROOT), since cargo
 # needs the full workspace.
 #
-# The `semantic` feature's first `function_lookup` call downloads a BERT
-# model (BAAI/bge-base-en-v1.5, see mnemosyne-semantic-search/src/embedder.rs)
-# from HuggingFace Hub. The sealed task network (`tasknet`, internal) has no
-# route there, so it is pre-fetched here at build time, while this stage
-# still has normal internet egress, and baked into the image's HF cache.
+# Semantic search is disabled by default for e2e so CI does not depend on
+# HuggingFace Hub availability or credentials. Set MNEMOSYNE_SEMANTIC=true to
+# build with embeddings; that mode pre-fetches BAAI/bge-base-en-v1.5 while this
+# stage still has internet egress, then bakes the HF cache into the runtime
+# image for the sealed task network.
 
 FROM rust:1-slim-bookworm AS build
 WORKDIR /src
@@ -18,18 +18,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config libssl-dev ca-certificates python3-pip && rm -rf /var/lib/apt/lists/* \
     && pip install --break-system-packages --no-cache-dir "huggingface_hub[cli]"
 COPY . .
-# `semantic` is mnemosyne-mcp-server's default feature (see its Cargo.toml);
-# built explicitly here so the Dockerfile stays correct if that changes.
-RUN cargo build --release -p mnemosyne-mcp-server --features semantic
+ARG MNEMOSYNE_SEMANTIC=false
+RUN if [ "$MNEMOSYNE_SEMANTIC" = "true" ]; then \
+      cargo build --release -p mnemosyne-mcp-server --features semantic; \
+    else \
+      cargo build --release -p mnemosyne-mcp-server --no-default-features; \
+    fi
 
-# Pre-fetch the embedding model into this stage's HF cache (the Rust hf_hub
-# crate and the Python huggingface_hub CLI share the same on-disk cache
-# layout under ~/.cache/huggingface/hub) so it can be copied verbatim into
-# the runtime image and the sealed task network never needs to reach
-# HuggingFace. Keep this repo id in sync with EmbedModel::default() in
-# mnemosyne-semantic-search/src/embedder.rs.
-RUN huggingface-cli download BAAI/bge-base-en-v1.5 \
-    tokenizer.json config.json model.safetensors
+# Pre-fetch the embedding model only when semantic search is enabled. The Rust
+# hf_hub crate and Python huggingface_hub CLI share the same on-disk cache
+# layout under ~/.cache/huggingface/hub. Keep this repo id in sync with
+# EmbedModel::default() in mnemosyne-semantic-search/src/embedder.rs.
+RUN mkdir -p /root/.cache/huggingface \
+    && if [ "$MNEMOSYNE_SEMANTIC" = "true" ]; then \
+      huggingface-cli download BAAI/bge-base-en-v1.5 \
+        tokenizer.json config.json model.safetensors; \
+    fi
 
 FROM node:20-bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \

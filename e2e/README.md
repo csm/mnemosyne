@@ -21,7 +21,7 @@ e2e/
   run-phase2.sh              Phase 2 orchestrator: session 1 -> session 2 (carryover) -> session 2 (control) -> analysis
   analyze-carryover.py       mechanical carryover detection + turn/token deltas (see run-phase2.sh)
   docker/
-    agent.Dockerfile          base image: mnemosyne-mcp-server (built with `semantic`) + Claude Code
+    agent.Dockerfile          base image: mnemosyne-mcp-server (semantic optional) + Claude Code
     litellm/config.yaml       model routing; the only file touched to switch models
   tasks/<task-id>/
     task.yaml                 prompt file, mode, io-policy, timeout, max-turns, seed
@@ -68,6 +68,15 @@ export ANTHROPIC_API_KEY=sk-...       # real key, held only by the litellm sidec
 
 Run the same task 3+ times with different `--seed` values before trusting a
 pass rate; LLM task success is high-variance (see "Metrics" in the plan doc).
+
+By default, the e2e base image builds `mnemosyne-mcp-server` without the
+`semantic` feature so CI does not need to download model weights from
+HuggingFace. `function_lookup` still works through exact and full-text search,
+and semantic-mode queries fall back to full-text. To test embeddings explicitly,
+run with `MNEMOSYNE_E2E_SEMANTIC=true`; that build pre-fetches
+`BAAI/bge-base-en-v1.5` into the image while the Docker build has network
+egress. Private/gated HuggingFace credentials are not required for the default
+e2e path.
 
 `--run-id ID` overrides the generated run id (and so the `results/<id>`
 directory name); `run-phase2.sh` uses this to know exactly where each leg's
