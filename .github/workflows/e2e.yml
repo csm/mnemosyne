@@ -1,0 +1,134 @@
+name: E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: Inference provider to use for the e2e run.
+        required: true
+        default: together.ai
+        type: choice
+        options:
+          - together.ai
+          - Anthropic
+          - OpenAI
+      model:
+        description: Optional provider model. Leave blank to use the provider default.
+        required: false
+        type: string
+      task:
+        description: E2E task id to run.
+        required: true
+        default: bugfix-py
+        type: choice
+        options:
+          - bugfix-py
+          - bugfix-clj
+          - logs-analysis
+          - sadserver-webstack
+      mode:
+        description: Tool access mode for the e2e harness.
+        required: true
+        default: mnemosyne-only
+        type: choice
+        options:
+          - mnemosyne-only
+          - mixed
+      seed:
+        description: Seed passed to the e2e harness.
+        required: true
+        default: '1'
+        type: string
+      reset_data:
+        description: Reset the task data volume before running.
+        required: true
+        default: true
+        type: boolean
+
+jobs:
+  e2e:
+    name: ${{ inputs.task }} (${{ inputs.provider }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select inference provider
+        id: inference
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          provider='${{ inputs.provider }}'
+          requested_model='${{ inputs.model }}'
+
+          case "$provider" in
+            'together.ai')
+              default_model='zai-org/GLM-5.2'
+              model_prefix='together_ai'
+              api_key_env='TOGETHER_API_KEY'
+              ;;
+            'Anthropic')
+              default_model='claude-sonnet-5'
+              model_prefix='anthropic'
+              api_key_env='ANTHROPIC_API_KEY'
+              ;;
+            'OpenAI')
+              default_model='gpt-4o'
+              model_prefix='openai'
+              api_key_env='OPENAI_API_KEY'
+              ;;
+            *)
+              echo "Unsupported provider: $provider" >&2
+              exit 2
+              ;;
+          esac
+
+          model="${requested_model:-$default_model}"
+          if [[ -z "${!api_key_env:-}" ]]; then
+            echo "Missing required GitHub Actions secret: $api_key_env" >&2
+            exit 2
+          fi
+
+          litellm_model="$model"
+          if [[ ! "$model" =~ ^(together_ai|anthropic|openai)/ ]]; then
+            litellm_model="$model_prefix/$model"
+          fi
+
+          cat > e2e/docker/litellm/config.yaml <<YAML
+          model_list:
+            - model_name: task-model
+              litellm_params:
+                model: ${litellm_model}
+                api_key: os.environ/${api_key_env}
+
+          litellm_settings:
+            drop_params: true
+            set_verbose: false
+          YAML
+
+          echo "provider=$provider" >> "$GITHUB_OUTPUT"
+          echo "model=$litellm_model" >> "$GITHUB_OUTPUT"
+          echo "api_key_env=$api_key_env" >> "$GITHUB_OUTPUT"
+
+      - name: Run e2e task
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=("${{ inputs.task }}" --mode "${{ inputs.mode }}" --seed "${{ inputs.seed }}")
+          if [[ '${{ inputs.reset_data }}' == 'true' ]]; then
+            args+=(--reset-data)
+          fi
+          ./e2e/run.sh "${args[@]}"
+
+      - name: Upload e2e results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-${{ inputs.task }}-${{ inputs.provider }}-${{ inputs.seed }}
+          path: e2e/results/
+          if-no-files-found: warn
