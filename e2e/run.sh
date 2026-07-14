@@ -91,8 +91,12 @@ LITELLM_CONTAINER="mnemosyne-e2e-litellm-${RUN_ID}"
 
 echo "== task=$TASK_ID mode=$MODE seed=$SEED run_id=$RUN_ID =="
 
-echo "-- building base agent image ($BASE_IMAGE) --"
-docker build -f "$SCRIPT_DIR/docker/agent.Dockerfile" -t "$BASE_IMAGE" "$REPO_ROOT"
+echo "-- building base agent image ($BASE_IMAGE; semantic=${MNEMOSYNE_E2E_SEMANTIC:-false}) --"
+docker build \
+  --build-arg MNEMOSYNE_SEMANTIC="${MNEMOSYNE_E2E_SEMANTIC:-false}" \
+  -f "$SCRIPT_DIR/docker/agent.Dockerfile" \
+  -t "$BASE_IMAGE" \
+  "$REPO_ROOT"
 
 if [[ -x "$TASK_DIR/fixture/prepare.sh" ]]; then
   echo "-- preparing fixture (host-side, seed-dependent generation) --"
