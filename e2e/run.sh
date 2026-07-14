@@ -3,6 +3,13 @@
 #
 # Usage:
 #   ./run.sh <task-id> [--mode mnemosyne-only|mixed] [--seed N] [--reset-data]
+#             [--data-volume NAME] [--run-id ID]
+#
+# --data-volume overrides the default per-task-id named volume (used by
+# run-phase2.sh to point two different task ids at the same /mnemosyne-data
+# volume for a Phase 2 carryover pair). --run-id overrides the generated
+# run id/results directory name, so a caller can predict where a run's
+# transcript.jsonl and mnemosyne-data.tar will land without scraping stdout.
 #
 # See ../doc/E2E-TESTING.md ("Architecture", "Harness", "Repository layout")
 # for the design this implements.
@@ -13,7 +20,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 TASK_ID="${1:-}"
 if [[ -z "$TASK_ID" || "$TASK_ID" == -* ]]; then
-  echo "usage: $0 <task-id> [--mode mnemosyne-only|mixed] [--seed N] [--reset-data]" >&2
+  echo "usage: $0 <task-id> [--mode mnemosyne-only|mixed] [--seed N] [--reset-data] [--data-volume NAME] [--run-id ID]" >&2
   exit 2
 fi
 shift
@@ -46,11 +53,15 @@ PROMPT_FILE="$(yaml_get prompt_file prompt.md)"
 GRADER_REL="$(yaml_get grader grader/grade.py)"
 
 RESET_DATA=0
+DATA_VOLUME_OVERRIDE=""
+RUN_ID_OVERRIDE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --mode) MODE="$2"; shift 2 ;;
     --seed) SEED="$2"; shift 2 ;;
     --reset-data) RESET_DATA=1; shift ;;
+    --data-volume) DATA_VOLUME_OVERRIDE="$2"; shift 2 ;;
+    --run-id) RUN_ID_OVERRIDE="$2"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -60,7 +71,7 @@ if [[ "$MODE" != "mnemosyne-only" && "$MODE" != "mixed" ]]; then
   exit 2
 fi
 
-RUN_ID="${TASK_ID}-${MODE}-seed${SEED}-$(date +%Y%m%d%H%M%S)"
+RUN_ID="${RUN_ID_OVERRIDE:-${TASK_ID}-${MODE}-seed${SEED}-$(date +%Y%m%d%H%M%S)}"
 RESULTS_DIR="$SCRIPT_DIR/results/$RUN_ID"
 mkdir -p "$RESULTS_DIR"
 
@@ -69,7 +80,11 @@ BASE_IMAGE="mnemosyne-e2e-agent-base"
 # content at build time via --build-arg SEED, so the image itself is
 # seed-specific, not just the container.
 TASK_IMAGE="mnemosyne-e2e-task-${TASK_ID}-seed${SEED}"
-DATA_VOLUME="mnemosyne-data-${TASK_ID}"
+# Defaults to one volume per task id, so re-running the same task-id reuses
+# its function store across invocations. Phase 2 carryover pairs (see
+# ../doc/E2E-TESTING.md, "Phase 2") point a *different* task-id's run at an
+# explicit shared volume via --data-volume -- see run-phase2.sh.
+DATA_VOLUME="${DATA_VOLUME_OVERRIDE:-mnemosyne-data-${TASK_ID}}"
 NETWORK="tasknet"
 AGENT_CONTAINER="mnemosyne-e2e-agent-${RUN_ID}"
 LITELLM_CONTAINER="mnemosyne-e2e-litellm-${RUN_ID}"

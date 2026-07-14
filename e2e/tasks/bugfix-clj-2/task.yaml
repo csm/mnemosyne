@@ -1,0 +1,16 @@
+id: bugfix-clj-2
+mode: mnemosyne-only          # or: mixed
+io_policy: allow-all          # server flags for the run
+timeout_minutes: 30
+max_turns: 80
+seed: 1
+prompt_file: prompt.md
+grader: grader/bugfix-clj-2-grader   # built by grader/build.sh (see run.sh)
+
+# Phase 2 companion of bugfix-clj (see ../../../doc/E2E-TESTING.md, "Phase
+# 2: memory carryover"): a related library, overlapping domain (shares
+# dates/epoch.clj verbatim; adds a weekly-recurrence module with its own
+# seeded bugs). Not run standalone -- use ../../run-phase2.sh bugfix-clj,
+# which runs bugfix-clj (session 1), then this task twice: once against
+# session 1's /mnemosyne-data volume (carryover) and once against an empty
+# one (control).
