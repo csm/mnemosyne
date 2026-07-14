@@ -1,0 +1,18 @@
+[workspace]
+
+[package]
+name = "bugfix-clj-2-grader"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "bugfix-clj-2-grader"
+path = "src/main.rs"
+
+[dependencies]
+# Loads the project's own Clojure runtime -- grading runs the fixed-up
+# fixture through the exact same interpreter clojure_eval uses, not a
+# reimplementation.
+mnemosyne-execution-engine = { path = "../../../../../mnemosyne-execution-engine" }
+cljrs-builtins = "0.1.223"
+serde_json = "1"

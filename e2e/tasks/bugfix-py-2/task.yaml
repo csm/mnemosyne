@@ -1,0 +1,16 @@
+id: bugfix-py-2
+mode: mnemosyne-only          # or: mixed
+io_policy: allow-all          # server flags for the run
+timeout_minutes: 30
+max_turns: 80
+seed: 1
+prompt_file: prompt.md
+grader: grader/grade.py        # run on host / in grader container
+
+# Phase 2 companion of bugfix-py (see ../../../doc/E2E-TESTING.md, "Phase
+# 2: memory carryover"): a different Python project (inventory API, not
+# the task API), same difficulty split (one shallow bug, one requiring
+# real understanding) and same Flask+pytest workflow. Not run standalone --
+# use ../../run-phase2.sh bugfix-py, which runs bugfix-py (session 1), then
+# this task twice: once against session 1's /mnemosyne-data volume
+# (carryover) and once against an empty one (control).

@@ -1,0 +1,19 @@
+id: logs-analysis-2
+mode: mnemosyne-only          # or: mixed
+io_policy: allow-all          # server flags for the run
+timeout_minutes: 30
+max_turns: 80
+seed: 2                       # different from logs-analysis' seed=1: a fresh
+                              # log window, per doc/E2E-TESTING.md Phase 2
+prompt_file: prompt.md
+grader: grader/grade.py        # run on host / in grader container
+
+# Phase 2 companion of logs-analysis (see ../../../doc/E2E-TESTING.md,
+# "Phase 2: memory carryover"). Not run standalone -- use
+# ../../run-phase2.sh logs-analysis, which runs logs-analysis (session 1),
+# then this task twice: once against session 1's /mnemosyne-data volume
+# (carryover) and once against an empty one (control).
+#
+# fixture/prepare.sh reuses logs-analysis' own generate.py (same schema,
+# new seed) rather than forking it; prompt.md adds one new question
+# (total_request_count) that the shared generator already computes.

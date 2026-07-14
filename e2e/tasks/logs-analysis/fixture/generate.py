@@ -264,6 +264,12 @@ def build(seed: int, hours: int, events_per_hour: int) -> tuple[list[Record], di
         "scraper_user_agent": SCRAPER_UA,
         "credential_stuffing_distinct_ip_count": len(attacker_ips),
         "credential_stuffing_endpoint": LOGIN_ENDPOINT,
+        # Not asked by logs-analysis' own prompt -- kept here so it's
+        # reproducible from --seed alone like everything else, and reused
+        # unchanged as the "one new question" in logs-analysis-2 (see
+        # ../../logs-analysis-2/fixture/prompt.md and doc/E2E-TESTING.md's
+        # "Phase 2: memory carryover").
+        "total_request_count": len(records),
         "_generation": {"seed": seed, "hours": hours, "events_per_hour": events_per_hour},
     }
     return records, answers
