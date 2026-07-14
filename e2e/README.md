@@ -3,7 +3,7 @@
 Implements **Phase 1** and **Phase 2** of
 [`doc/E2E-TESTING.md`](../doc/E2E-TESTING.md): the four Phase 1 task
 scenarios (run single-session in both tool-access modes, against a real MCP
-client -- Claude Code -- driving `mnemosyne-mcp-server`), plus Phase 2's
+client -- Claude Code or Codex CLI -- driving `mnemosyne-mcp-server`), plus Phase 2's
 memory-carryover pairs, which run a session-2 task twice against the same
 `/mnemosyne-data` volume a session-1 task left behind -- once for real, once
 against an empty control volume -- and mechanically detect whether session 2
@@ -21,7 +21,7 @@ e2e/
   run-phase2.sh              Phase 2 orchestrator: session 1 -> session 2 (carryover) -> session 2 (control) -> analysis
   analyze-carryover.py       mechanical carryover detection + turn/token deltas (see run-phase2.sh)
   docker/
-    agent.Dockerfile          base image: mnemosyne-mcp-server (built with `semantic`) + Claude Code
+    agent.Dockerfile          base image: mnemosyne-mcp-server (built with `semantic`) + Claude Code + Codex CLI
     litellm/config.yaml       model routing; the only file touched to switch models
   tasks/<task-id>/
     task.yaml                 prompt file, mode, io-policy, timeout, max-turns, seed
@@ -37,10 +37,29 @@ e2e/
 ## Running a task
 
 ```sh
+# Default: Claude Code routed through LiteLLM.
 export ANTHROPIC_API_KEY=sk-...       # real key, held only by the litellm sidecar
 ./run.sh bugfix-py --mode mnemosyne-only --seed 1
 ./run.sh bugfix-py --mode mixed --seed 1
+
+# Subscription routes bypass LiteLLM. Log in on the host first, then mount
+# the CLI's config directory into the agent container.
+claude login
+./run.sh bugfix-py --agent claude --llm-route subscription --mode mixed
+
+codex login
+./run.sh bugfix-py --agent codex --llm-route subscription --mode mixed
 ```
+
+`--agent claude|codex` chooses the headless MCP client. `--llm-route
+litellm|subscription` chooses whether model traffic goes through the sealed
+LiteLLM sidecar or directly through a manually authenticated CLI subscription.
+The subscription route intentionally attaches the agent container to Docker's
+`bridge` network so the CLI can reach Anthropic/OpenAI, and it creates an empty
+`litellm-usage.jsonl` placeholder because LiteLLM is not in the path. Override
+`CLAUDE_CONFIG_DIR` or `CODEX_CONFIG_DIR` if your host login state is somewhere
+other than `~/.claude` or `~/.codex`. Codex subscription runs currently require
+`--llm-route subscription`; Claude can run either way.
 
 `run.sh`:
 
@@ -48,10 +67,13 @@ export ANTHROPIC_API_KEY=sk-...       # real key, held only by the litellm sidec
    as build context, so it can `cargo build` the workspace);
 2. builds `mnemosyne-e2e-task-<task-id>` from `tasks/<task-id>/fixture/Dockerfile`,
    which `FROM`s the base image and layers in the task's fixture;
-3. creates the `tasknet` internal Docker network (no default egress) and
-   starts the `litellm` sidecar dual-homed on `tasknet` and the default
-   bridge (the only path to the real model API);
-4. runs the agent container on `tasknet` only, with `--allowedTools` set per
+3. for `--llm-route litellm`, creates the `tasknet` internal Docker network
+   (no default egress) and starts the `litellm` sidecar dual-homed on
+   `tasknet` and the default bridge (the only path to the real model API);
+   for `--llm-route subscription`, skips LiteLLM and runs the agent on
+   Docker's bridge network with the selected CLI's host login state mounted
+   read-only;
+4. runs the agent container on the selected network, with `--allowedTools` set per
    `mode`, and a *named volume* for `/mnemosyne-data` (`mnemosyne-data-<task-id>`
    by default; override with `--data-volume NAME` so two different task ids'
    runs can share one volume, which is exactly what Phase 2 carryover pairs

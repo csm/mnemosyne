@@ -2,8 +2,14 @@
 # Orchestrator for a single e2e task run: build -> run agent -> stop -> grade -> collect.
 #
 # Usage:
-#   ./run.sh <task-id> [--mode mnemosyne-only|mixed] [--seed N] [--reset-data]
+#   ./run.sh <task-id> [--mode mnemosyne-only|mixed] [--agent claude|codex]
+#             [--llm-route litellm|subscription] [--seed N] [--reset-data]
 #             [--data-volume NAME] [--run-id ID]
+#
+# --agent selects the headless MCP client. --llm-route=litellm keeps the
+# sealed-network proxy setup; --llm-route=subscription skips LiteLLM and
+# lets the agent CLI use a pre-authenticated subscription mounted from the
+# host (CLAUDE_CONFIG_DIR or CODEX_CONFIG_DIR).
 #
 # --data-volume overrides the default per-task-id named volume (used by
 # run-phase2.sh to point two different task ids at the same /mnemosyne-data
@@ -20,7 +26,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 TASK_ID="${1:-}"
 if [[ -z "$TASK_ID" || "$TASK_ID" == -* ]]; then
-  echo "usage: $0 <task-id> [--mode mnemosyne-only|mixed] [--seed N] [--reset-data] [--data-volume NAME] [--run-id ID]" >&2
+  echo "usage: $0 <task-id> [--mode mnemosyne-only|mixed] [--agent claude|codex] [--llm-route litellm|subscription] [--seed N] [--reset-data] [--data-volume NAME] [--run-id ID]" >&2
   exit 2
 fi
 shift
@@ -45,6 +51,8 @@ yaml_get() {
 }
 
 MODE="$(yaml_get mode mnemosyne-only)"
+AGENT="${E2E_AGENT:-claude}"
+LLM_ROUTE="${E2E_LLM_ROUTE:-litellm}"
 IO_POLICY="$(yaml_get io_policy allow-all)"
 TIMEOUT_MINUTES="$(yaml_get timeout_minutes 30)"
 MAX_TURNS="$(yaml_get max_turns 80)"
@@ -58,6 +66,8 @@ RUN_ID_OVERRIDE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --mode) MODE="$2"; shift 2 ;;
+    --agent) AGENT="$2"; shift 2 ;;
+    --llm-route) LLM_ROUTE="$2"; shift 2 ;;
     --seed) SEED="$2"; shift 2 ;;
     --reset-data) RESET_DATA=1; shift ;;
     --data-volume) DATA_VOLUME_OVERRIDE="$2"; shift 2 ;;
@@ -68,6 +78,18 @@ done
 
 if [[ "$MODE" != "mnemosyne-only" && "$MODE" != "mixed" ]]; then
   echo "invalid mode: $MODE (expected mnemosyne-only or mixed)" >&2
+  exit 2
+fi
+if [[ "$AGENT" != "claude" && "$AGENT" != "codex" ]]; then
+  echo "invalid agent: $AGENT (expected claude or codex)" >&2
+  exit 2
+fi
+if [[ "$LLM_ROUTE" != "litellm" && "$LLM_ROUTE" != "subscription" ]]; then
+  echo "invalid llm route: $LLM_ROUTE (expected litellm or subscription)" >&2
+  exit 2
+fi
+if [[ "$AGENT" == "codex" && "$LLM_ROUTE" == "litellm" ]]; then
+  echo "codex currently requires --llm-route subscription; use --agent claude --llm-route litellm for proxy-routed runs" >&2
   exit 2
 fi
 
@@ -89,7 +111,7 @@ NETWORK="tasknet"
 AGENT_CONTAINER="mnemosyne-e2e-agent-${RUN_ID}"
 LITELLM_CONTAINER="mnemosyne-e2e-litellm-${RUN_ID}"
 
-echo "== task=$TASK_ID mode=$MODE seed=$SEED run_id=$RUN_ID =="
+echo "== task=$TASK_ID mode=$MODE agent=$AGENT llm_route=$LLM_ROUTE seed=$SEED run_id=$RUN_ID =="
 
 echo "-- building base agent image ($BASE_IMAGE) --"
 docker build -f "$SCRIPT_DIR/docker/agent.Dockerfile" -t "$BASE_IMAGE" "$REPO_ROOT"
@@ -119,24 +141,31 @@ if [[ "$RESET_DATA" -eq 1 ]]; then
 fi
 docker volume create "$DATA_VOLUME" >/dev/null
 
-echo "-- ensuring internal network $NETWORK --"
-docker network create --internal "$NETWORK" >/dev/null 2>&1 || true
+AGENT_NETWORK="$NETWORK"
+if [[ "$LLM_ROUTE" == "litellm" ]]; then
+  echo "-- ensuring internal network $NETWORK --"
+  docker network create --internal "$NETWORK" >/dev/null 2>&1 || true
 
-echo "-- starting litellm sidecar ($LITELLM_CONTAINER) --"
-docker run -d --name "$LITELLM_CONTAINER" \
-  --network "$NETWORK" \
-  -e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}" \
-  -e "OPENAI_API_KEY=${OPENAI_API_KEY:-}" \
-  -e "OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}" \
-  -v "$SCRIPT_DIR/docker/litellm/config.yaml:/etc/litellm/config.yaml:ro" \
-  -v "$RESULTS_DIR:/results" \
-  ghcr.io/berriai/litellm:main-stable \
-  --config /etc/litellm/config.yaml --port 4000 \
-  --detailed_debug --log_file /results/litellm-usage.jsonl >/dev/null
+  echo "-- starting litellm sidecar ($LITELLM_CONTAINER) --"
+  docker run -d --name "$LITELLM_CONTAINER" \
+    --network "$NETWORK" \
+    -e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}" \
+    -e "OPENAI_API_KEY=${OPENAI_API_KEY:-}" \
+    -e "OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}" \
+    -v "$SCRIPT_DIR/docker/litellm/config.yaml:/etc/litellm/config.yaml:ro" \
+    -v "$RESULTS_DIR:/results" \
+    ghcr.io/berriai/litellm:main-stable \
+    --config /etc/litellm/config.yaml --port 4000 \
+    --detailed_debug --log_file /results/litellm-usage.jsonl >/dev/null
 
-# The proxy is the only container dual-homed onto a network with real
-# egress; it needs a second, non-internal network to reach the model API.
-docker network connect bridge "$LITELLM_CONTAINER" >/dev/null 2>&1 || true
+  # The proxy is the only container dual-homed onto a network with real
+  # egress; it needs a second, non-internal network to reach the model API.
+  docker network connect bridge "$LITELLM_CONTAINER" >/dev/null 2>&1 || true
+else
+  echo "-- subscription route: skipping litellm and allowing agent container bridge egress --"
+  AGENT_NETWORK="bridge"
+  : > "$RESULTS_DIR/litellm-usage.jsonl"
+fi
 
 case "$MODE" in
   mnemosyne-only) ALLOWED_TOOLS="mcp__mnemosyne__*" ;;
@@ -163,12 +192,41 @@ cat > "$RESULTS_DIR/mcp.json" <<EOF
 }
 EOF
 
-HARNESS_CMD="claude -p \"\$(cat /task/${PROMPT_FILE})\" \
-  --mcp-config /etc/mcp.json --strict-mcp-config \
-  --allowedTools \"${ALLOWED_TOOLS}\" \
-  --output-format stream-json \
-  --max-turns ${MAX_TURNS} \
-  > /results/transcript.jsonl"
+cat > "$RESULTS_DIR/codex-config.toml" <<EOF
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+
+[mcp_servers.mnemosyne]
+command = "/usr/local/bin/mnemosyne-mcp-server"
+args = [$(echo "$MCP_ARGS" | sed -E 's/(\S+)/"\1",/g' | sed 's/,$//')]
+EOF
+
+if [[ "$AGENT" == "claude" ]]; then
+  HARNESS_CMD="claude -p \"\$(cat /task/${PROMPT_FILE})\" \
+    --mcp-config /etc/mcp.json --strict-mcp-config \
+    --allowedTools \"${ALLOWED_TOOLS}\" \
+    --output-format stream-json \
+    --max-turns ${MAX_TURNS} \
+    > /results/transcript.jsonl"
+else
+  HARNESS_CMD="mkdir -p /home/mnemosyne/.codex && cp -a /home/mnemosyne/.codex-host/. /home/mnemosyne/.codex/ 2>/dev/null || true; cat /etc/codex-config.toml >> /home/mnemosyne/.codex/config.toml; codex exec --skip-git-repo-check --json \"\$(cat /task/${PROMPT_FILE})\" > /results/transcript.jsonl"
+fi
+
+DOCKER_ENV=(-e MNEMOSYNE_TASK_SEED="$SEED")
+DOCKER_MOUNTS=(-v "$DATA_VOLUME:/mnemosyne-data" -v "$RESULTS_DIR/mcp.json:/etc/mcp.json:ro" -v "$RESULTS_DIR/codex-config.toml:/etc/codex-config.toml:ro" -v "$RESULTS_DIR:/results")
+if [[ "$LLM_ROUTE" == "litellm" ]]; then
+  DOCKER_ENV+=(-e ANTHROPIC_BASE_URL="http://${LITELLM_CONTAINER}:4000" -e ANTHROPIC_AUTH_TOKEN=dummy-key)
+else
+  if [[ "$AGENT" == "claude" ]]; then
+    CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+    [[ -d "$CLAUDE_CONFIG_DIR" ]] || { echo "missing Claude config dir: $CLAUDE_CONFIG_DIR (run 'claude login' on the host or set CLAUDE_CONFIG_DIR)" >&2; exit 2; }
+    DOCKER_MOUNTS+=(-v "$CLAUDE_CONFIG_DIR:/home/mnemosyne/.claude:ro")
+  else
+    CODEX_CONFIG_DIR="${CODEX_CONFIG_DIR:-$HOME/.codex}"
+    [[ -d "$CODEX_CONFIG_DIR" ]] || { echo "missing Codex config dir: $CODEX_CONFIG_DIR (run 'codex login' on the host or set CODEX_CONFIG_DIR)" >&2; exit 2; }
+    DOCKER_MOUNTS+=(-v "$CODEX_CONFIG_DIR:/home/mnemosyne/.codex-host:ro")
+  fi
+fi
 
 echo "-- running agent container ($AGENT_CONTAINER), timeout ${TIMEOUT_MINUTES}m --"
 set +e
@@ -179,13 +237,9 @@ if [[ "$TASK_ID" == "sadserver-webstack" ]]; then
   # exec` into an already-started, detached container, instead of being
   # the container's main command like every other task.
   docker run -d --name "$AGENT_CONTAINER" \
-    --network "$NETWORK" \
-    -e ANTHROPIC_BASE_URL="http://${LITELLM_CONTAINER}:4000" \
-    -e ANTHROPIC_AUTH_TOKEN=dummy-key \
-    -e MNEMOSYNE_TASK_SEED="$SEED" \
-    -v "$DATA_VOLUME:/mnemosyne-data" \
-    -v "$RESULTS_DIR/mcp.json:/etc/mcp.json:ro" \
-    -v "$RESULTS_DIR:/results" \
+    --network "$AGENT_NETWORK" \
+    "${DOCKER_ENV[@]}" \
+    "${DOCKER_MOUNTS[@]}" \
     "$TASK_IMAGE" >/dev/null
   sleep 3 # let nginx/the app/the log writer come up before the agent probes them
   docker exec --user mnemosyne "$AGENT_CONTAINER" \
@@ -193,14 +247,10 @@ if [[ "$TASK_ID" == "sadserver-webstack" ]]; then
   HARNESS_EXIT=$?
 else
   docker run --name "$AGENT_CONTAINER" \
-    --network "$NETWORK" \
+    --network "$AGENT_NETWORK" \
     --user mnemosyne \
-    -e ANTHROPIC_BASE_URL="http://${LITELLM_CONTAINER}:4000" \
-    -e ANTHROPIC_AUTH_TOKEN=dummy-key \
-    -e MNEMOSYNE_TASK_SEED="$SEED" \
-    -v "$DATA_VOLUME:/mnemosyne-data" \
-    -v "$RESULTS_DIR/mcp.json:/etc/mcp.json:ro" \
-    -v "$RESULTS_DIR:/results" \
+    "${DOCKER_ENV[@]}" \
+    "${DOCKER_MOUNTS[@]}" \
     "$TASK_IMAGE" \
     timeout "${TIMEOUT_MINUTES}m" bash -c "$HARNESS_CMD"
   HARNESS_EXIT=$?
@@ -266,6 +316,8 @@ docker run --rm -v "$DATA_VOLUME:/data:ro" -v "$RESULTS_DIR:/results" alpine \
 
 echo "-- tearing down run containers --"
 docker rm -f "$AGENT_CONTAINER" >/dev/null 2>&1 || true
-docker rm -f "$LITELLM_CONTAINER" >/dev/null 2>&1 || true
+if [[ "$LLM_ROUTE" == "litellm" ]]; then
+  docker rm -f "$LITELLM_CONTAINER" >/dev/null 2>&1 || true
+fi
 
 echo "== done: $RESULTS_DIR (harness exit $HARNESS_EXIT) =="

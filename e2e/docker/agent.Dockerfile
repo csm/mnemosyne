@@ -1,5 +1,5 @@
 # Base agent image: mnemosyne-mcp-server (built with the `semantic` feature)
-# + Claude Code, the harness. Task images `FROM` this and layer in a fixture
+# + Claude Code and Codex CLI, the harnesses. Task images `FROM` this and layer in a fixture
 # (see tasks/<id>/fixture/Dockerfile) — this file never sees a task's
 # fixture or grader, so it is built once and reused across all tasks/seeds.
 #
@@ -34,7 +34,7 @@ RUN huggingface-cli download BAAI/bge-base-en-v1.5 \
 FROM node:20-bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl git && rm -rf /var/lib/apt/lists/* \
-    && npm install -g @anthropic-ai/claude-code \
+    && npm install -g @anthropic-ai/claude-code @openai/codex \
     && useradd --create-home --shell /bin/bash mnemosyne
 
 COPY --from=build /src/target/release/mnemosyne-mcp-server /usr/local/bin/mnemosyne-mcp-server
