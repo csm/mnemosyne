@@ -1,0 +1,50 @@
+# LiteLLM proxy config: the only file touched to switch models between runs
+# (see "Harness" and "Pluggable model URL" in doc/E2E-TESTING.md).
+#
+# The agent container only ever knows the logical name `task-model` via
+# ANTHROPIC_BASE_URL=http://<litellm-container>:4000; it never sees which
+# underlying provider/model that resolves to, and never holds a real API key
+# (ANTHROPIC_AUTH_TOKEN=dummy-key is a placeholder the proxy ignores in favor
+# of its own provider credentials, passed to the litellm container only).
+#
+# To point a run at a different provider, change `litellm_params` below and
+# restart the sidecar -- nothing in agent.Dockerfile or any task image
+# changes.
+
+model_list:
+  - model_name: task-model
+    litellm_params:
+      # Default: real Anthropic API via the key handed to the litellm
+      # container's environment (ANTHROPIC_API_KEY), never the agent's.
+      model: anthropic/claude-sonnet-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # Swap the block above for one of these (or add a second `task-model`
+  # entry with a distinct alias) to change providers without touching any
+  # task image:
+  #
+  # - model_name: task-model
+  #   litellm_params:
+  #     model: openrouter/anthropic/claude-3.5-sonnet
+  #     api_key: os.environ/OPENROUTER_API_KEY
+  #
+  # - model_name: task-model
+  #   litellm_params:
+  #     model: openai/gpt-4o
+  #     api_key: os.environ/OPENAI_API_KEY
+  #
+  # - model_name: task-model
+  #   litellm_params:
+  #     # Ollama host reachable from the proxy container (not the sealed
+  #     # agent network), for fully local / zero-credit runs.
+  #     model: ollama/llama3.1
+  #     api_base: http://host.docker.internal:11434
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+
+# Per-run token/cost accounting (doc/E2E-TESTING.md "Token efficiency"):
+# litellm-usage.jsonl is mounted by run.sh at /results and passed via
+# --log_file so proxy-side usage survives independent of the harness
+# transcript, and the two can be cross-checked.

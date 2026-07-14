@@ -1,0 +1,13 @@
+id: logs-analysis
+mode: mnemosyne-only          # or: mixed
+io_policy: allow-all          # server flags for the run
+timeout_minutes: 30
+max_turns: 80
+seed: 1
+prompt_file: prompt.md
+grader: grader/grade.py        # run on host / in grader container
+
+# fixture/prepare.sh runs generate.py on the host at build time with
+# --hours 6 (~9k log lines at the default --events-per-hour); the plan
+# doc's ~500MB figure is reachable by raising --hours/--events-per-hour in
+# prepare.sh for a real Phase 1 run without touching this schema.
