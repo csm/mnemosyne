@@ -127,6 +127,7 @@ docker run -d --name "$LITELLM_CONTAINER" \
   --network "$NETWORK" \
   -e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}" \
   -e "OPENAI_API_KEY=${OPENAI_API_KEY:-}" \
+  -e "TOGETHER_API_KEY=${TOGETHER_API_KEY:-}" \
   -e "OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}" \
   -v "$SCRIPT_DIR/docker/litellm/config.yaml:/etc/litellm/config.yaml:ro" \
   -v "$RESULTS_DIR:/results" \
