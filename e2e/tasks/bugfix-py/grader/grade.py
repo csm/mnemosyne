@@ -32,12 +32,17 @@ def check_visible_tests_untouched(project_dir: Path) -> tuple[bool, str]:
 
 
 def run_hidden_suite(project_dir: Path, workdir: Path) -> dict:
-    hidden_dst = project_dir / "tests_hidden"
-    if hidden_dst.exists():
-        shutil.rmtree(hidden_dst)
-    shutil.copytree(HERE / "hidden_tests", hidden_dst)
+    # The submitted /task snapshot is mounted read-only in the grader
+    # container. Copy the project into our writable tempdir before adding the
+    # hidden test suite so grading does not depend on mutating /task/project.
+    run_project_dir = workdir / "project"
+    shutil.copytree(
+        project_dir,
+        run_project_dir,
+        ignore=shutil.ignore_patterns(".git", "__pycache__", ".pytest_cache", "tests_hidden"),
+    )
+    shutil.copytree(HERE / "hidden_tests", run_project_dir / "tests_hidden")
 
-    report_path = workdir / "pytest_report.json"
     proc = subprocess.run(
         [
             sys.executable, "-m", "pytest",
@@ -45,7 +50,7 @@ def run_hidden_suite(project_dir: Path, workdir: Path) -> dict:
             "-q", "--tb=short",
             f"--junit-xml={workdir / 'junit.xml'}",
         ],
-        cwd=project_dir,
+        cwd=run_project_dir,
         capture_output=True,
         text=True,
         timeout=300,
